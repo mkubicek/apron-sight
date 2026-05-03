@@ -1,0 +1,381 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		8B6A1F1E2D4C4A9187B00101 /* ApronSightApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00020 /* ApronSightApp.swift */; };
+		8B6A1F1E2D4C4A9187B00102 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00021 /* AppModel.swift */; };
+		8B6A1F1E2D4C4A9187B00103 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00022 /* ContentView.swift */; };
+		8B6A1F1E2D4C4A9187B00104 /* ImmersiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00023 /* ImmersiveView.swift */; };
+		8B6A1F1E2D4C4A9187B00105 /* GeoCoordinate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00024 /* GeoCoordinate.swift */; };
+		8B6A1F1E2D4C4A9187B00106 /* GeoMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00025 /* GeoMath.swift */; };
+		8B6A1F1E2D4C4A9187B00107 /* DemoScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00026 /* DemoScenario.swift */; };
+		8B6A1F1E2D4C4A9187B00108 /* Aircraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00028 /* Aircraft.swift */; };
+		8B6A1F1E2D4C4A9187B00109 /* A350_Qatar_CC_BY.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00029 /* A350_Qatar_CC_BY.usdz */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		8B6A1F1E2D4C4A9187B00003 /* apron-sight.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "apron-sight.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		8B6A1F1E2D4C4A9187B00020 /* ApronSightApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApronSightApp.swift; sourceTree = "<group>"; };
+		8B6A1F1E2D4C4A9187B00021 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		8B6A1F1E2D4C4A9187B00022 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		8B6A1F1E2D4C4A9187B00023 /* ImmersiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersiveView.swift; sourceTree = "<group>"; };
+		8B6A1F1E2D4C4A9187B00024 /* GeoCoordinate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoCoordinate.swift; sourceTree = "<group>"; };
+		8B6A1F1E2D4C4A9187B00025 /* GeoMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoMath.swift; sourceTree = "<group>"; };
+		8B6A1F1E2D4C4A9187B00026 /* DemoScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoScenario.swift; sourceTree = "<group>"; };
+		8B6A1F1E2D4C4A9187B00027 /* PLAN.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PLAN.md; sourceTree = "<group>"; };
+		8B6A1F1E2D4C4A9187B00028 /* Aircraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Aircraft.swift; sourceTree = "<group>"; };
+		8B6A1F1E2D4C4A9187B00029 /* A350_Qatar_CC_BY.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = Models/A350/Processed/A350_Qatar_CC_BY.usdz; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		8B6A1F1E2D4C4A9187B00006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		8B6A1F1E2D4C4A9187B00010 = {
+			isa = PBXGroup;
+			children = (
+				8B6A1F1E2D4C4A9187B00012 /* ApronSight/App */,
+				8B6A1F1E2D4C4A9187B00013 /* Sources/ApronSightCore */,
+				8B6A1F1E2D4C4A9187B00015 /* Assets */,
+				8B6A1F1E2D4C4A9187B00014 /* docs */,
+				8B6A1F1E2D4C4A9187B00011 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		8B6A1F1E2D4C4A9187B00011 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				8B6A1F1E2D4C4A9187B00003 /* apron-sight.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		8B6A1F1E2D4C4A9187B00012 /* ApronSight/App */ = {
+			isa = PBXGroup;
+			children = (
+				8B6A1F1E2D4C4A9187B00020 /* ApronSightApp.swift */,
+				8B6A1F1E2D4C4A9187B00021 /* AppModel.swift */,
+				8B6A1F1E2D4C4A9187B00022 /* ContentView.swift */,
+				8B6A1F1E2D4C4A9187B00023 /* ImmersiveView.swift */,
+			);
+			path = ApronSight/App;
+			sourceTree = "<group>";
+		};
+		8B6A1F1E2D4C4A9187B00013 /* Sources/ApronSightCore */ = {
+			isa = PBXGroup;
+			children = (
+				8B6A1F1E2D4C4A9187B00024 /* GeoCoordinate.swift */,
+				8B6A1F1E2D4C4A9187B00025 /* GeoMath.swift */,
+				8B6A1F1E2D4C4A9187B00026 /* DemoScenario.swift */,
+				8B6A1F1E2D4C4A9187B00028 /* Aircraft.swift */,
+			);
+			path = Sources/ApronSightCore;
+			sourceTree = "<group>";
+		};
+		8B6A1F1E2D4C4A9187B00014 /* docs */ = {
+			isa = PBXGroup;
+			children = (
+				8B6A1F1E2D4C4A9187B00027 /* PLAN.md */,
+			);
+			path = docs;
+			sourceTree = "<group>";
+		};
+		8B6A1F1E2D4C4A9187B00015 /* Assets */ = {
+			isa = PBXGroup;
+			children = (
+				8B6A1F1E2D4C4A9187B00029 /* A350_Qatar_CC_BY.usdz */,
+			);
+			path = Assets;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		8B6A1F1E2D4C4A9187B00002 /* apron-sight */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8B6A1F1E2D4C4A9187B00041 /* Build configuration list for PBXNativeTarget "apron-sight" */;
+			buildPhases = (
+				8B6A1F1E2D4C4A9187B00004 /* Sources */,
+				8B6A1F1E2D4C4A9187B00006 /* Frameworks */,
+				8B6A1F1E2D4C4A9187B00005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "apron-sight";
+			productName = "apron-sight";
+			productReference = 8B6A1F1E2D4C4A9187B00003 /* apron-sight.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		8B6A1F1E2D4C4A9187B00001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2640;
+				LastUpgradeCheck = 2640;
+				TargetAttributes = {
+					8B6A1F1E2D4C4A9187B00002 = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
+				};
+			};
+			buildConfigurationList = 8B6A1F1E2D4C4A9187B00040 /* Build configuration list for PBXProject "apron-sight" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 8B6A1F1E2D4C4A9187B00010;
+			productRefGroup = 8B6A1F1E2D4C4A9187B00011 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				8B6A1F1E2D4C4A9187B00002 /* apron-sight */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		8B6A1F1E2D4C4A9187B00005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8B6A1F1E2D4C4A9187B00109 /* A350_Qatar_CC_BY.usdz in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		8B6A1F1E2D4C4A9187B00004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8B6A1F1E2D4C4A9187B00101 /* ApronSightApp.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00102 /* AppModel.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00103 /* ContentView.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00104 /* ImmersiveView.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00105 /* GeoCoordinate.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00106 /* GeoMath.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00107 /* DemoScenario.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00108 /* Aircraft.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		8B6A1F1E2D4C4A9187B00042 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = xros;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		8B6A1F1E2D4C4A9187B00043 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = xros;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		8B6A1F1E2D4C4A9187B00044 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "apron-sight";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.milankubicek.apronsight;
+				PRODUCT_NAME = "apron-sight";
+				SDKROOT = xros;
+				SUPPORTED_PLATFORMS = "xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_MODULE_NAME = ApronSight;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 7;
+				XROS_DEPLOYMENT_TARGET = 2.0;
+			};
+			name = Debug;
+		};
+		8B6A1F1E2D4C4A9187B00045 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "apron-sight";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.milankubicek.apronsight;
+				PRODUCT_NAME = "apron-sight";
+				SDKROOT = xros;
+				SUPPORTED_PLATFORMS = "xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_MODULE_NAME = ApronSight;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 7;
+				XROS_DEPLOYMENT_TARGET = 2.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		8B6A1F1E2D4C4A9187B00040 /* Build configuration list for PBXProject "apron-sight" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8B6A1F1E2D4C4A9187B00042 /* Debug */,
+				8B6A1F1E2D4C4A9187B00043 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8B6A1F1E2D4C4A9187B00041 /* Build configuration list for PBXNativeTarget "apron-sight" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8B6A1F1E2D4C4A9187B00044 /* Debug */,
+				8B6A1F1E2D4C4A9187B00045 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 8B6A1F1E2D4C4A9187B00001 /* Project object */;
+}
