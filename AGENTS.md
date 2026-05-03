@@ -81,9 +81,8 @@ Selection has been through several iterations and is the most architecturally lo
 
 These are loose ends an agent should be aware of:
 
-1. **Repo isn't ready for public push yet.** No `LICENSE` file, and `apron-sight.xcodeproj/project.pbxproj` carries a committed `DEVELOPMENT_TEAM = "";` that should be cleared (and the history scrubbed) before any push. A `Config/OpenSkyCredentials.example.json` template would help contributors.
-2. **`models-staging/CANDIDATES.md`** is research-only scratch outside `Assets/`. Decide before commit: include in the repo (share research) or `.gitignore` it.
-3. **30s dead-reckoning bound.** `GeoMath.maximumDeadReckoningSeconds = 30` extrapolates aircraft for up to 30s after the last snapshot. Could be tightened or made adaptive if field test shows visible drift before the next poll lands.
+1. **30s dead-reckoning bound.** `GeoMath.maximumDeadReckoningSeconds = 30` extrapolates aircraft for up to 30s after the last snapshot. Could be tightened or made adaptive if field test shows visible drift before the next poll lands.
+2. **Forking note.** `PRODUCT_BUNDLE_IDENTIFIER` is `com.milankubicek.apronsight` and `DEVELOPMENT_TEAM` is intentionally blank in `apron-sight.xcodeproj/project.pbxproj`. Anyone forking needs to set their own bundle ID and signing team in Xcode before they can run on device.
 
 ## Things to avoid
 

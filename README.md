@@ -77,4 +77,8 @@ The bundled A350 model is by **jhag** (via Sketchfab / FetchCFD) under [Creative
 
 ## License
 
-License for the project's own code is TBD. The bundled A350 asset stays under CC-BY 4.0 regardless.
+The project's own code is released under the [MIT License](LICENSE). The bundled A350 asset is separately licensed under [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/) — see [`docs/MODEL_ATTRIBUTION.md`](docs/MODEL_ATTRIBUTION.md).
+
+## Forking
+
+`PRODUCT_BUNDLE_IDENTIFIER` is `com.milankubicek.apronsight` and `DEVELOPMENT_TEAM` is intentionally blank. Set your own bundle ID and signing team in Xcode before building for device.

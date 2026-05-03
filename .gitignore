@@ -5,3 +5,4 @@ xcuserdata/
 *.xcuserstate
 .swiftpm/
 Config/OpenSkyCredentials.local.json
+models-staging/
