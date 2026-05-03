@@ -151,4 +151,82 @@ final class GeoMathTests: XCTestCase {
         XCTAssertEqual(zrhCenter.longitudeDegrees, 8.549200, accuracy: 0.000_001)
         XCTAssertEqual(zrhCenter.altitudeMeters, 432, accuracy: 0.001)
     }
+
+    func testAngularAircraftSelectionUsesUserPositionForTapDirection() {
+        let userPosition = SIMD3<Double>(2, 0, 1)
+        let forward = SIMD3<Double>(0, 0, -1)
+        let nearbyOffset = direction(yawDegrees: 1.5)
+        let candidates = [
+            AngularSelectionCandidate(
+                id: "nearby",
+                positionMeters: userPosition + nearbyOffset * 1_000,
+                selectionRadiusMeters: 100
+            ),
+            AngularSelectionCandidate(
+                id: "exact",
+                positionMeters: userPosition + forward * 50_000,
+                selectionRadiusMeters: 2_500
+            )
+        ]
+
+        let selected = AngularAircraftSelector.selectedID(
+            tapPositionMeters: userPosition + forward * 8,
+            userPositionMeters: userPosition,
+            candidates: candidates
+        )
+
+        XCTAssertEqual(selected, "exact")
+    }
+
+    func testAngularAircraftSelectionBreaksOverlapsBySmallestAngularDistance() {
+        let userPosition = SIMD3<Double>(-3, 0.5, 4)
+        let candidates = [
+            AngularSelectionCandidate(
+                id: "wider-miss",
+                positionMeters: userPosition + direction(yawDegrees: 2.0) * 50_000,
+                selectionRadiusMeters: 3_000
+            ),
+            AngularSelectionCandidate(
+                id: "closest",
+                positionMeters: userPosition + direction(yawDegrees: -0.4) * 50_000,
+                selectionRadiusMeters: 3_000
+            )
+        ]
+
+        let selected = AngularAircraftSelector.selectedID(
+            tapPositionMeters: userPosition + SIMD3<Double>(0, 0, -8),
+            userPositionMeters: userPosition,
+            candidates: candidates
+        )
+
+        XCTAssertEqual(selected, "closest")
+    }
+
+    func testAngularAircraftSelectionRejectsOutsideCone() {
+        let selected = AngularAircraftSelector.selectedID(
+            tapPositionMeters: SIMD3<Double>(0, 0, -8),
+            candidates: [
+                AngularSelectionCandidate(
+                    id: "outside",
+                    positionMeters: direction(yawDegrees: 10) * 50_000,
+                    selectionRadiusMeters: 2_500
+                )
+            ]
+        )
+
+        XCTAssertNil(selected)
+    }
+
+    func testAngularSelectionRadiusUsesSphereHalfAngle() {
+        XCTAssertEqual(
+            AngularAircraftSelector.angularRadiusRadians(selectionRadiusMeters: 60, distanceMeters: 60),
+            .pi / 2,
+            accuracy: 0.000_001
+        )
+    }
+
+    private func direction(yawDegrees: Double) -> SIMD3<Double> {
+        let radians = GeoMath.degreesToRadians(yawDegrees)
+        return SIMD3<Double>(sin(radians), 0, -cos(radians))
+    }
 }

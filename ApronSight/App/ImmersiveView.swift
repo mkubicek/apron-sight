@@ -18,17 +18,28 @@ final class ImmersiveSceneRenderer {
     weak var groundCursor: Entity?
     weak var groundCursorLine: ModelEntity?
     weak var compassOverlay: Entity?
+    weak var headAnchor: AnchorEntity?
+    weak var selectionProxyRoot: Entity?
     var aircraftEntitiesByID: [String: Entity] = [:]
     var aircraftVisualsByID: [String: Entity] = [:]
-    var collisionRadiusByAircraftID: [String: Float] = [:]
+    var selectionProxyByAircraftID: [String: Entity] = [:]
+    var selectionProxyRadiusByAircraftID: [String: Float] = [:]
 }
 
 struct ImmersiveView: View {
     @ObservedObject var model: AppModel
     @State private var renderer = ImmersiveSceneRenderer()
+    private static let selectionProxyDistanceMeters: Float = 8
+    private static let minimumSelectionProxyRadiusMeters: Float = 0.28
+    private static let maximumSelectionProxyAngularRadiusDegrees = 6.0
 
     var body: some View {
         RealityView { content in
+            let headAnchor = AnchorEntity(.head)
+            headAnchor.name = "HeadAnchor"
+            content.add(headAnchor)
+            renderer.headAnchor = headAnchor
+
             let aircraftRoot = Entity()
             aircraftRoot.name = "AircraftRoot"
             content.add(aircraftRoot)
@@ -78,6 +89,11 @@ struct ImmersiveView: View {
             content.add(compassOverlay)
             renderer.compassOverlay = compassOverlay
 
+            let selectionProxyRoot = Entity()
+            selectionProxyRoot.name = "AircraftSelectionProxyRoot"
+            content.add(selectionProxyRoot)
+            renderer.selectionProxyRoot = selectionProxyRoot
+
             // Per-frame entity updates run here, NOT in the SwiftUI `update:`
             // closure. That way render cadence is the visionOS frame rate
             // (90 Hz), independent of how often `@Published` properties on
@@ -93,8 +109,15 @@ struct ImmersiveView: View {
                 .targetedToAnyEntity()
                 .onEnded { value in
                     let tapPosition = value.convert(value.location3D, from: .local, to: .scene)
+                    let userPosition = renderer.headAnchor?.position(relativeTo: nil) ?? .zero
                     let aircraftList = model.currentAircraft()
-                    if let id = Self.aircraftID(from: value.entity, tapPosition: tapPosition, model: model, aircraftList: aircraftList) {
+                    if let id = Self.aircraftID(
+                        from: value.entity,
+                        tapPosition: tapPosition,
+                        userPosition: userPosition,
+                        model: model,
+                        aircraftList: aircraftList
+                    ) {
                         model.selectAircraft(id: id)
                     }
                 }
@@ -108,6 +131,7 @@ struct ImmersiveView: View {
             ?? aircraftList.first
             ?? DemoScenario.homeDemoAircraft
         let referencePosition = model.realityPosition(for: referenceAircraft)
+        let userPosition = renderer.headAnchor?.position(relativeTo: nil) ?? .zero
         let referenceOrientation = simd_quatf(
             angle: Float(GeoMath.degreesToRadians(model.aircraftRealityYawDegrees(for: referenceAircraft))),
             axis: SIMD3<Float>(0, 1, 0)
@@ -118,6 +142,17 @@ struct ImmersiveView: View {
                 in: aircraftRoot,
                 renderer: renderer,
                 aircraftList: aircraftList,
+                detailedAircraftID: referenceAircraft.id,
+                model: model
+            )
+        }
+
+        if let selectionProxyRoot = renderer.selectionProxyRoot {
+            syncSelectionProxyEntities(
+                in: selectionProxyRoot,
+                renderer: renderer,
+                aircraftList: aircraftList,
+                userPosition: userPosition,
                 model: model
             )
         }
@@ -187,10 +222,6 @@ struct ImmersiveView: View {
     private static func makeSelectableAircraftEntity(id: String) -> Entity {
         let root = Entity()
         root.name = "Aircraft:\(id)"
-        root.components.set(InputTargetComponent())
-        // Real radius is set per-frame from `selectionRadiusMeters(for:)`.
-        // Seed with a small placeholder so the component exists.
-        root.components.set(CollisionComponent(shapes: [.generateSphere(radius: 60)]))
 
         let visual = makeLightweightAircraftMarker()
         visual.name = "AircraftVisual"
@@ -203,6 +234,7 @@ struct ImmersiveView: View {
         in root: Entity,
         renderer: ImmersiveSceneRenderer,
         aircraftList: [Aircraft],
+        detailedAircraftID: String,
         model: AppModel
     ) {
         var activeAircraftIDs = Set<String>()
@@ -223,18 +255,9 @@ struct ImmersiveView: View {
                 axis: SIMD3<Float>(0, 1, 0)
             )
 
-            let radius = Float(model.selectionRadiusMeters(for: aircraft))
-            if shouldUpdateCollisionRadius(
-                cached: renderer.collisionRadiusByAircraftID[aircraft.id],
-                next: radius
-            ) {
-                entity.components.set(CollisionComponent(shapes: [.generateSphere(radius: radius)]))
-                renderer.collisionRadiusByAircraftID[aircraft.id] = radius
-            }
-
             if let visual = renderer.aircraftVisualsByID[aircraft.id] {
                 visual.scale = model.markerVisualScale(for: aircraft)
-                visual.isEnabled = true
+                visual.isEnabled = aircraft.id != detailedAircraftID
             }
         }
 
@@ -243,7 +266,71 @@ struct ImmersiveView: View {
             renderer.aircraftEntitiesByID[aircraftID]?.removeFromParent()
             renderer.aircraftEntitiesByID[aircraftID] = nil
             renderer.aircraftVisualsByID[aircraftID] = nil
-            renderer.collisionRadiusByAircraftID[aircraftID] = nil
+        }
+    }
+
+    private static func makeSelectionProxyEntity(id: String) -> Entity {
+        let root = Entity()
+        root.name = "AircraftSelectionProxy:\(id)"
+        root.components.set(InputTargetComponent())
+        root.components.set(CollisionComponent(shapes: [.generateSphere(radius: Self.minimumSelectionProxyRadiusMeters)]))
+        return root
+    }
+
+    private static func syncSelectionProxyEntities(
+        in root: Entity,
+        renderer: ImmersiveSceneRenderer,
+        aircraftList: [Aircraft],
+        userPosition: SIMD3<Float>,
+        model: AppModel
+    ) {
+        var activeAircraftIDs = Set<String>()
+
+        for aircraft in aircraftList {
+            activeAircraftIDs.insert(aircraft.id)
+            let proxy = renderer.selectionProxyByAircraftID[aircraft.id] ?? {
+                let newProxy = makeSelectionProxyEntity(id: aircraft.id)
+                root.addChild(newProxy)
+                renderer.selectionProxyByAircraftID[aircraft.id] = newProxy
+                return newProxy
+            }()
+
+            let aircraftVector = model.realityPosition(for: aircraft) - userPosition
+            let aircraftDistance = simd_length(aircraftVector)
+            guard aircraftDistance > 0.001 else {
+                proxy.isEnabled = false
+                continue
+            }
+
+            let direction = simd_normalize(aircraftVector)
+            proxy.position = userPosition + direction * Self.selectionProxyDistanceMeters
+
+            let selectionAngularRadius = min(
+                AngularAircraftSelector.angularRadiusRadians(
+                    selectionRadiusMeters: model.selectionRadiusMeters(for: aircraft),
+                    distanceMeters: Double(aircraftDistance)
+                ),
+                GeoMath.degreesToRadians(Self.maximumSelectionProxyAngularRadiusDegrees)
+            )
+            let proxyRadius = max(
+                Self.minimumSelectionProxyRadiusMeters,
+                Self.selectionProxyDistanceMeters * Float(tan(selectionAngularRadius))
+            )
+            if shouldUpdateCollisionRadius(
+                cached: renderer.selectionProxyRadiusByAircraftID[aircraft.id],
+                next: proxyRadius
+            ) {
+                proxy.components.set(CollisionComponent(shapes: [.generateSphere(radius: proxyRadius)]))
+                renderer.selectionProxyRadiusByAircraftID[aircraft.id] = proxyRadius
+            }
+            proxy.isEnabled = true
+        }
+
+        let staleAircraftIDs = Set(renderer.selectionProxyByAircraftID.keys).subtracting(activeAircraftIDs)
+        for aircraftID in staleAircraftIDs {
+            renderer.selectionProxyByAircraftID[aircraftID]?.removeFromParent()
+            renderer.selectionProxyByAircraftID[aircraftID] = nil
+            renderer.selectionProxyRadiusByAircraftID[aircraftID] = nil
         }
     }
 
@@ -258,13 +345,22 @@ struct ImmersiveView: View {
     private static func aircraftID(
         from entity: Entity,
         tapPosition: SIMD3<Float>,
+        userPosition: SIMD3<Float>,
         model: AppModel,
         aircraftList: [Aircraft]
     ) -> String? {
-        aircraftIDClosestToTapDirection(
-            tapPosition: tapPosition,
-            model: model,
-            aircraftList: aircraftList
+        let candidates = aircraftList.map {
+            AngularSelectionCandidate(
+                id: $0.id,
+                positionMeters: doubleVector(model.realityPosition(for: $0)),
+                selectionRadiusMeters: model.selectionRadiusMeters(for: $0)
+            )
+        }
+
+        return AngularAircraftSelector.selectedID(
+            tapPositionMeters: doubleVector(tapPosition),
+            userPositionMeters: doubleVector(userPosition),
+            candidates: candidates
         ) ?? aircraftID(from: entity)
     }
 
@@ -273,47 +369,15 @@ struct ImmersiveView: View {
             return String(entity.name.dropFirst("Aircraft:".count))
         }
 
+        if entity.name.hasPrefix("AircraftSelectionProxy:") {
+            return String(entity.name.dropFirst("AircraftSelectionProxy:".count))
+        }
+
         return entity.parent.flatMap { aircraftID(from: $0) }
     }
 
-    private static func aircraftIDClosestToTapDirection(
-        tapPosition: SIMD3<Float>,
-        model: AppModel,
-        aircraftList: [Aircraft]
-    ) -> String? {
-        let tapDistance = simd_length(tapPosition)
-        guard tapDistance > 0.001 else {
-            return nil
-        }
-
-        let tapDirection = simd_normalize(tapPosition)
-        var bestAircraftID: String?
-        var bestAngularDistance = Float.greatestFiniteMagnitude
-
-        for aircraft in aircraftList {
-            let aircraftPosition = model.realityPosition(for: aircraft)
-            let aircraftDistance = simd_length(aircraftPosition)
-            guard aircraftDistance > 0.001 else {
-                continue
-            }
-
-            let aircraftDirection = simd_normalize(aircraftPosition)
-            let dot = min(max(simd_dot(tapDirection, aircraftDirection), -1), 1)
-            let angularDistance = acos(dot)
-            let selectionRadius = Float(model.selectionRadiusMeters(for: aircraft))
-            let selectionAngularRadius = atan(selectionRadius / aircraftDistance)
-
-            guard angularDistance <= selectionAngularRadius else {
-                continue
-            }
-
-            if angularDistance < bestAngularDistance {
-                bestAngularDistance = angularDistance
-                bestAircraftID = aircraft.id
-            }
-        }
-
-        return bestAircraftID
+    private static func doubleVector(_ vector: SIMD3<Float>) -> SIMD3<Double> {
+        SIMD3<Double>(Double(vector.x), Double(vector.y), Double(vector.z))
     }
 
     private static func makeA350Marker() -> Entity {

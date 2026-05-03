@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 public enum GeoMath {
     private static let earthSemiMajorAxisMeters = 6_378_137.0
@@ -169,6 +170,71 @@ public enum GeoMath {
             east: localX * cosYaw + forward * sinYaw,
             north: -localX * sinYaw + forward * cosYaw
         )
+    }
+}
+
+public struct AngularSelectionCandidate: Equatable, Sendable {
+    public var id: String
+    public var positionMeters: SIMD3<Double>
+    public var selectionRadiusMeters: Double
+
+    public init(id: String, positionMeters: SIMD3<Double>, selectionRadiusMeters: Double) {
+        self.id = id
+        self.positionMeters = positionMeters
+        self.selectionRadiusMeters = selectionRadiusMeters
+    }
+}
+
+public enum AngularAircraftSelector {
+    public static func selectedID(
+        tapPositionMeters: SIMD3<Double>,
+        userPositionMeters: SIMD3<Double> = .zero,
+        candidates: [AngularSelectionCandidate]
+    ) -> String? {
+        let tapVector = tapPositionMeters - userPositionMeters
+        let tapDistance = simd_length(tapVector)
+        guard tapDistance > 0.001 else {
+            return nil
+        }
+
+        let tapDirection = simd_normalize(tapVector)
+        var bestID: String?
+        var bestAngularDistance = Double.greatestFiniteMagnitude
+
+        for candidate in candidates {
+            let candidateVector = candidate.positionMeters - userPositionMeters
+            let candidateDistance = simd_length(candidateVector)
+            guard candidateDistance > 0.001 else {
+                continue
+            }
+
+            let candidateDirection = simd_normalize(candidateVector)
+            let dot = min(max(simd_dot(tapDirection, candidateDirection), -1), 1)
+            let angularDistance = acos(dot)
+            let selectionAngularRadius = angularRadiusRadians(
+                selectionRadiusMeters: candidate.selectionRadiusMeters,
+                distanceMeters: candidateDistance
+            )
+
+            guard angularDistance <= selectionAngularRadius else {
+                continue
+            }
+
+            if angularDistance < bestAngularDistance {
+                bestAngularDistance = angularDistance
+                bestID = candidate.id
+            }
+        }
+
+        return bestID
+    }
+
+    public static func angularRadiusRadians(selectionRadiusMeters: Double, distanceMeters: Double) -> Double {
+        guard selectionRadiusMeters > 0, distanceMeters > 0 else {
+            return 0
+        }
+
+        return asin(min(selectionRadiusMeters / distanceMeters, 1))
     }
 }
 
