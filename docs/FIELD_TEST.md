@@ -80,7 +80,7 @@ Use aircraft selection:
 - Distance rings with meter labels out to `500 m` on the manually calibrated ground should make the horizontal range easier to estimate.
 - The yellow projection marker and dark aircraft silhouette should sit on the manual ground plane under the selected aircraft.
 - The yellow vertical line should make the selected aircraft's elevation above ground easier to read.
-- The selected/primary aircraft is a textured A350 model scaled in meters. A procedural A350-style model remains as a fallback if the asset fails to load.
+- The selected/primary aircraft is a textured A350 model scaled in meters. The lightweight aircraft marker remains as the fallback if the asset fails to load.
 - The marker should feel plausibly anchored in the direction of the target coordinate, not merely glued to the headset.
 
 ## Known Limitations

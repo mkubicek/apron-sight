@@ -4,6 +4,7 @@ public enum GeoMath {
     private static let earthSemiMajorAxisMeters = 6_378_137.0
     private static let earthFlattening = 1.0 / 298.257_223_563
     private static let earthFirstEccentricitySquared = earthFlattening * (2.0 - earthFlattening)
+    public static let maximumDeadReckoningSeconds: TimeInterval = 30
 
     public static func degreesToRadians(_ degrees: Double) -> Double {
         degrees * .pi / 180.0
@@ -115,6 +116,27 @@ public enum GeoMath {
             latitudeDegrees: coordinate.latitudeDegrees + radiansToDegrees(latitudeDelta),
             longitudeDegrees: coordinate.longitudeDegrees + radiansToDegrees(longitudeDelta),
             altitudeMeters: coordinate.altitudeMeters + upMeters
+        )
+    }
+
+    public static func deadReckoningElapsedSeconds(capturedAt: Date, date: Date) -> TimeInterval {
+        min(max(date.timeIntervalSince(capturedAt), 0), maximumDeadReckoningSeconds)
+    }
+
+    public static func deadReckonedCoordinate(
+        from coordinate: GeoCoordinate,
+        velocityMetersPerSecond: Double,
+        trueTrackDegrees: Double,
+        verticalRateMetersPerSecond: Double,
+        elapsedSeconds: TimeInterval
+    ) -> GeoCoordinate {
+        let boundedElapsedSeconds = min(max(elapsedSeconds, 0), maximumDeadReckoningSeconds)
+        let trackRadians = degreesToRadians(trueTrackDegrees)
+        return GeoMath.coordinate(
+            offsetFrom: coordinate,
+            eastMeters: velocityMetersPerSecond * sin(trackRadians) * boundedElapsedSeconds,
+            northMeters: velocityMetersPerSecond * cos(trackRadians) * boundedElapsedSeconds,
+            upMeters: verticalRateMetersPerSecond * boundedElapsedSeconds
         )
     }
 

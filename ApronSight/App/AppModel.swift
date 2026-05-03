@@ -7,6 +7,59 @@ struct AircraftStatus {
     let relativeDistanceMeters: Double
     let heightAboveGroundMeters: Double
     let groundSpeedMetersPerSecond: Double
+    let bearingDegrees: Double
+    let relativeBearingDegrees: Double
+    let elevationDegrees: Double
+    let originCountry: String?
+    let verticalRateMetersPerSecond: Double?
+}
+
+enum LocationPresetOption: String, CaseIterable, Identifiable {
+    case home
+    case zrhObservationDeck
+    case zrhCenter
+    case custom
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .home:
+            return "Home"
+        case .zrhObservationDeck:
+            return "ZRH deck"
+        case .zrhCenter:
+            return "ZRH center"
+        case .custom:
+            return "Custom"
+        }
+    }
+
+    func preset(currentObserver: GeoCoordinate) -> LocationPreset {
+        switch self {
+        case .home:
+            return .home
+        case .zrhObservationDeck:
+            return .zrhObservationDeck
+        case .zrhCenter:
+            return .zrhCenter
+        case .custom:
+            return .custom(currentObserver)
+        }
+    }
+
+    static func option(for preset: LocationPreset) -> Self {
+        switch preset {
+        case .home:
+            return .home
+        case .zrhObservationDeck:
+            return .zrhObservationDeck
+        case .zrhCenter:
+            return .zrhCenter
+        case .custom:
+            return .custom
+        }
+    }
 }
 
 @MainActor
@@ -15,10 +68,19 @@ final class AppModel: ObservableObject {
     static let importedAircraftLengthMeters = 5.0
     static let demoMarkerLengthMeters = 8.0
     static let defaultObserverHeightAboveGroundMeters = 1.6
+    private static let selectionAngularRadiusDegrees = 1.2
+    private static let maximumSelectionRadiusMeters = 500.0
+    private static let minimumMarkerAngularLengthDegrees = 0.9
 
-    @Published var observerLatitude: Double
-    @Published var observerLongitude: Double
-    @Published var observerAltitude: Double
+    @Published var observerLatitude: Double {
+        didSet { observerCoordinateDidChange() }
+    }
+    @Published var observerLongitude: Double {
+        didSet { observerCoordinateDidChange() }
+    }
+    @Published var observerAltitude: Double {
+        didSet { observerCoordinateDidChange() }
+    }
     @Published var observerHeightAboveGroundMeters: Double
     @Published var yawOffsetDegrees: Double
     @Published var targetEastOffsetMeters: Double
@@ -36,12 +98,16 @@ final class AppModel: ObservableObject {
     @Published var showDistanceOverlay: Bool
     @Published var showProjectionShadow: Bool
     @Published var selectedAircraftID: String?
-    @Published private(set) var simulationElapsedSeconds: TimeInterval
+    @Published var flightDataSource: FlightDataSource {
+        didSet { reconfigureFlightProvider(force: true) }
+    }
+    @Published var locationPresetOption: LocationPresetOption
+    @Published var lastFlightError: String?
     @Published private(set) var aircraft: [Aircraft]
 
-    private let aircraftProvider: any AircraftProvider
-    private var simulationTask: Task<Void, Never>?
-    private var simulationStartDate: Date = Date()
+    private let aircraftProvider: LiveAircraftProvider
+    private var flightUpdateTask: Task<Void, Never>?
+    private var isApplyingPreset = false
 
     init(
         observer: GeoCoordinate = DemoScenario.defaultObserver,
@@ -62,8 +128,12 @@ final class AppModel: ObservableObject {
         showDistanceOverlay: Bool = true,
         showProjectionShadow: Bool = true,
         selectedAircraftID: String? = nil,
-        aircraftProvider: any AircraftProvider = MockAircraftProvider()
+        flightDataSource: FlightDataSource = .mock,
+        locationPresetOption: LocationPresetOption = .home,
+        aircraftProvider: LiveAircraftProvider? = nil
     ) {
+        let resolvedAircraftProvider = aircraftProvider ?? LiveAircraftProvider()
+
         self.observerLatitude = observer.latitudeDegrees
         self.observerLongitude = observer.longitudeDegrees
         self.observerAltitude = observer.altitudeMeters
@@ -84,9 +154,18 @@ final class AppModel: ObservableObject {
         self.showDistanceOverlay = showDistanceOverlay
         self.showProjectionShadow = showProjectionShadow
         self.selectedAircraftID = selectedAircraftID
-        self.aircraftProvider = aircraftProvider
-        self.simulationElapsedSeconds = 0
-        self.aircraft = aircraftProvider.aircraft()
+        self.flightDataSource = flightDataSource
+        self.locationPresetOption = locationPresetOption
+        self.lastFlightError = nil
+        self.aircraft = []
+        self.aircraftProvider = resolvedAircraftProvider
+        self.aircraftProvider.errorHandler = { [weak self] message in
+            guard let self, self.lastFlightError != message else {
+                return
+            }
+
+            self.lastFlightError = message
+        }
     }
 
     var observer: GeoCoordinate {
@@ -105,8 +184,16 @@ final class AppModel: ObservableObject {
         SIMD3<Float>(0, Float(observerGroundElevationMeters - observerAltitude), 0)
     }
 
+    var primaryAircraft: Aircraft {
+        selectedAircraft ?? aircraft.first ?? DemoScenario.homeDemoAircraft
+    }
+
+    var target: Aircraft {
+        primaryAircraft
+    }
+
     var placement: GeoPlacement {
-        placement(for: target)
+        placement(for: primaryAircraft)
     }
 
     var targetLocalCoordinate: LocalCoordinate {
@@ -114,7 +201,7 @@ final class AppModel: ObservableObject {
     }
 
     var geospatialRealityPosition: SIMD3<Float> {
-        realityPosition(for: target, includingTuning: false)
+        realityPosition(for: primaryAircraft, includingTuning: false)
     }
 
     var localPlacementOffset: SIMD3<Float> {
@@ -126,7 +213,7 @@ final class AppModel: ObservableObject {
     }
 
     var targetRealityPosition: SIMD3<Float> {
-        realityPosition(for: target)
+        realityPosition(for: primaryAircraft)
     }
 
     var targetProjectionPosition: SIMD3<Float> {
@@ -146,16 +233,15 @@ final class AppModel: ObservableObject {
     }
 
     var aircraftScale: SIMD3<Float> {
-        let scale = Float(max(aircraftLengthMeters, 1) / Self.importedAircraftLengthMeters)
-        return SIMD3<Float>(repeating: scale)
+        scale(forAircraftLengthMeters: aircraftLengthMeters)
     }
 
     var aircraftRealityYawDegrees: Double {
-        aircraftRealityYawDegrees(for: target)
+        aircraftRealityYawDegrees(for: primaryAircraft)
     }
 
     var tunedDistanceMeters: Double {
-        relativeDistanceMeters(for: target)
+        relativeDistanceMeters(for: primaryAircraft)
     }
 
     var estimatedAircraftAngularLengthDegrees: Double {
@@ -209,11 +295,7 @@ final class AppModel: ObservableObject {
     }
 
     var relativeBearingDegrees: Double {
-        relativeBearingDegrees(for: target)
-    }
-
-    var target: Aircraft {
-        aircraft.first ?? DemoScenario.homeDemoAircraft
+        relativeBearingDegrees(for: primaryAircraft)
     }
 
     var selectedAircraft: Aircraft? {
@@ -233,15 +315,19 @@ final class AppModel: ObservableObject {
     }
 
     var targetCoordinate: GeoCoordinate {
-        displayCoordinate(for: target)
+        displayCoordinate(for: primaryAircraft)
     }
 
     var calibrationStatus: String {
         yawOffsetDegrees == 0 ? "Manual yaw: 0 deg" : "Manual yaw set"
     }
 
+    var flightSnapshotAgeSeconds: TimeInterval? {
+        aircraftProvider.snapshotAgeSeconds()
+    }
+
     func displayCoordinate(for aircraft: Aircraft) -> GeoCoordinate {
-        guard aircraft.id == target.id else {
+        guard aircraft.id == selectedAircraftID else {
             return aircraft.coordinate
         }
 
@@ -260,7 +346,7 @@ final class AppModel: ObservableObject {
     func realityPosition(for aircraft: Aircraft, includingTuning: Bool = true) -> SIMD3<Float> {
         let coordinate = GeoMath.localCoordinate(for: placement(for: aircraft), yawOffsetDegrees: yawOffsetDegrees)
         var position = SIMD3<Float>(Float(coordinate.x), Float(coordinate.y), Float(coordinate.z))
-        if includingTuning && aircraft.id == target.id {
+        if includingTuning && aircraft.id == selectedAircraftID {
             position += localPlacementOffset
         }
         return position
@@ -290,37 +376,33 @@ final class AppModel: ObservableObject {
     }
 
     func status(for aircraft: Aircraft) -> AircraftStatus {
-        AircraftStatus(
+        let placement = placement(for: aircraft)
+        return AircraftStatus(
             aircraft: aircraft,
             relativeDistanceMeters: relativeDistanceMeters(for: aircraft),
             heightAboveGroundMeters: heightAboveGroundMeters(for: aircraft),
-            groundSpeedMetersPerSecond: aircraft.velocityMetersPerSecond ?? 0
+            groundSpeedMetersPerSecond: aircraft.velocityMetersPerSecond ?? 0,
+            bearingDegrees: placement.bearingDegrees,
+            relativeBearingDegrees: relativeBearingDegrees(for: aircraft),
+            elevationDegrees: placement.elevationDegrees,
+            originCountry: aircraft.originCountry,
+            verticalRateMetersPerSecond: aircraft.verticalRateMetersPerSecond
         )
     }
 
     func selectionRadiusMeters(for aircraft: Aircraft) -> Double {
-        // Hold the tap target at ~2.5° of visual angle (tan 2.5° ≈ 0.044) so a
-        // distant aircraft is not a pinprick. Floor is the aircraft length so
-        // close-up taps still cover the visible airframe; ceiling stops giant
-        // aircraft on the horizon from blanketing their neighbours.
+        // Keep far targets gaze-selectable without letting large invisible
+        // spheres overlap whole approach streams.
         let distance = relativeDistanceMeters(for: aircraft)
-        let angularRadius = distance * 0.044
-        return min(max(angularRadius, aircraftLengthMeters * 0.7, 60), 1200)
+        let angularRadius = distance * tan(GeoMath.degreesToRadians(Self.selectionAngularRadiusDegrees))
+        return min(max(angularRadius, aircraftLengthMeters * 0.45, 24), Self.maximumSelectionRadiusMeters)
     }
 
-    func statusWindowPosition(for aircraft: Aircraft) -> SIMD3<Float> {
-        let position = realityPosition(for: aircraft)
-        let distance = max(Float(relativeDistanceMeters(for: aircraft)), 1)
-        return position + SIMD3<Float>(
-            max(18, distance * 0.025),
-            max(22, distance * 0.035),
-            0
-        )
-    }
-
-    func statusWindowScale(for aircraft: Aircraft) -> SIMD3<Float> {
-        let scale = max(Float(relativeDistanceMeters(for: aircraft)) * 0.012, 1.0)
-        return SIMD3<Float>(repeating: scale)
+    func markerVisualScale(for aircraft: Aircraft) -> SIMD3<Float> {
+        let distance = max(relativeDistanceMeters(for: aircraft), 1)
+        let minimumAngularLengthRadians = GeoMath.degreesToRadians(Self.minimumMarkerAngularLengthDegrees)
+        let minimumVisibleLength = 2 * distance * tan(minimumAngularLengthRadians / 2)
+        return scale(forAircraftLengthMeters: max(aircraftLengthMeters, minimumVisibleLength))
     }
 
     func selectAircraft(id: String) {
@@ -357,117 +439,96 @@ final class AppModel: ObservableObject {
         yawOffsetDegrees = placement.bearingDegrees.rounded()
     }
 
+    func applyPreset(_ preset: LocationPreset) {
+        isApplyingPreset = true
+        let coordinate = preset.coordinate
+        observerLatitude = coordinate.latitudeDegrees
+        observerLongitude = coordinate.longitudeDegrees
+        observerAltitude = coordinate.altitudeMeters
+        groundCalibrationOffsetMeters = 0
+        locationPresetOption = LocationPresetOption.option(for: preset)
+        isApplyingPreset = false
+        reconfigureFlightProvider(force: true)
+    }
+
+    func applyPresetOption(_ option: LocationPresetOption) {
+        applyPreset(option.preset(currentObserver: observer))
+    }
+
     func reloadAircraft() {
-        aircraft = aircraftProvider.aircraft()
+        publishCurrentAircraft()
     }
 
     /// Aircraft positions evaluated at `date`. Pure function — does not touch
     /// `@Published` state, so the per-frame renderer can call this on every
     /// frame without invalidating SwiftUI.
     func currentAircraft(at date: Date = Date()) -> [Aircraft] {
-        let elapsed = date.timeIntervalSince(simulationStartDate)
-        return Self.simulationSeeds.map { seed in
-            simulatedAircraft(seed: seed, elapsedSeconds: elapsed)
-        }
+        aircraftProvider.aircraft(at: date)
     }
 
-    /// Snap the simulation back to t=0 so the cluster sits near the observer
-    /// again after aircraft have drifted to the edge of their loop.
     func resetAircraftPositions() {
-        simulationStartDate = Date()
-        simulationElapsedSeconds = 0
-        aircraft = currentAircraft()
+        refreshFlights()
+    }
+
+    func refreshFlights() {
+        aircraftProvider.reset(observer: observer, source: flightDataSource)
+        publishCurrentAircraft()
     }
 
     func startSimulation() {
-        guard simulationTask == nil else {
+        guard flightUpdateTask == nil else {
             return
         }
 
-        simulationStartDate = Date().addingTimeInterval(-simulationElapsedSeconds)
-        simulationTask = Task { [weak self] in
+        aircraftProvider.start(observer: observer, source: flightDataSource)
+        flightUpdateTask = Task { [weak self] in
             guard let self else {
                 return
             }
 
-            await self.runSimulation()
+            await self.runFlightUpdates()
         }
     }
 
     func stopSimulation() {
-        simulationTask?.cancel()
-        simulationTask = nil
+        flightUpdateTask?.cancel()
+        flightUpdateTask = nil
+        aircraftProvider.stop()
     }
 
     /// Slow tick: keeps `@Published aircraft` fresh enough for the debug panel
-    /// and for selection lookup, without hammering SwiftUI invalidation. Per-
-    /// frame motion is driven by `currentAircraft(at:)` from the RealityKit
-    /// renderer, so this loop does *not* need to run at frame rate.
-    private func runSimulation() async {
+    /// and selection lookup, without hammering SwiftUI invalidation. Per-frame
+    /// motion is driven by `currentAircraft(at:)` from the RealityKit renderer.
+    private func runFlightUpdates() async {
         while !Task.isCancelled {
-            let elapsed = Date().timeIntervalSince(simulationStartDate)
-            simulationElapsedSeconds = elapsed
-            aircraft = Self.simulationSeeds.map { seed in
-                simulatedAircraft(seed: seed, elapsedSeconds: elapsed)
-            }
-            try? await Task.sleep(for: .milliseconds(500))
+            publishCurrentAircraft()
+            try? await Task.sleep(for: .milliseconds(1000))
         }
     }
 
-    private func simulatedAircraft(seed: FlightSeed, elapsedSeconds: TimeInterval) -> Aircraft {
-        let trackRadians = GeoMath.degreesToRadians(seed.trackDegrees)
-        let forwardEast = sin(trackRadians)
-        let forwardNorth = cos(trackRadians)
-        let rightEast = cos(trackRadians)
-        let rightNorth = -sin(trackRadians)
-        let travelled = (elapsedSeconds * seed.speedMetersPerSecond + seed.phaseMeters)
-            .truncatingRemainder(dividingBy: seed.pathLengthMeters)
-        let along = travelled - seed.pathLengthMeters / 2
-        let east = along * forwardEast + seed.crossTrackMeters * rightEast
-        let north = along * forwardNorth + seed.crossTrackMeters * rightNorth
-        let ground = GeoCoordinate(
-            latitudeDegrees: observerLatitude,
-            longitudeDegrees: observerLongitude,
-            altitudeMeters: observerGroundElevationMeters
-        )
+    private func observerCoordinateDidChange() {
+        guard !isApplyingPreset else {
+            return
+        }
 
-        return Aircraft(
-            id: seed.id,
-            callsign: seed.callsign,
-            coordinate: GeoMath.coordinate(
-                offsetFrom: ground,
-                eastMeters: east,
-                northMeters: north,
-                upMeters: seed.heightAboveGroundMeters
-            ),
-            velocityMetersPerSecond: seed.speedMetersPerSecond,
-            trueTrackDegrees: seed.trackDegrees,
-            verticalRateMetersPerSecond: 0,
-            isOnGround: false
-        )
+        locationPresetOption = .custom
+        reconfigureFlightProvider()
     }
 
-    private static let simulationSeeds: [FlightSeed] = [
-        FlightSeed(id: "DEMO01", callsign: "SWR214", trackDegrees: 64, speedMetersPerSecond: 42, heightAboveGroundMeters: 320, crossTrackMeters: -35, pathLengthMeters: 12000, phaseMeters: 6200),
-        FlightSeed(id: "DEMO02", callsign: "EZY83K", trackDegrees: 306, speedMetersPerSecond: 48, heightAboveGroundMeters: 480, crossTrackMeters: 160, pathLengthMeters: 14000, phaseMeters: 6400),
-        FlightSeed(id: "DEMO03", callsign: "DLH71P", trackDegrees: 102, speedMetersPerSecond: 55, heightAboveGroundMeters: 610, crossTrackMeters: -280, pathLengthMeters: 15000, phaseMeters: 8450),
-        FlightSeed(id: "DEMO04", callsign: "QTR51", trackDegrees: 250, speedMetersPerSecond: 68, heightAboveGroundMeters: 930, crossTrackMeters: 420, pathLengthMeters: 18000, phaseMeters: 7650),
-        FlightSeed(id: "DEMO05", callsign: "AUA905", trackDegrees: 176, speedMetersPerSecond: 39, heightAboveGroundMeters: 390, crossTrackMeters: 260, pathLengthMeters: 13000, phaseMeters: 7350),
-        FlightSeed(id: "DEMO06", callsign: "AFR46T", trackDegrees: 334, speedMetersPerSecond: 60, heightAboveGroundMeters: 760, crossTrackMeters: -520, pathLengthMeters: 17000, phaseMeters: 9900),
-        FlightSeed(id: "DEMO07", callsign: "BAW773", trackDegrees: 74, speedMetersPerSecond: 72, heightAboveGroundMeters: 1050, crossTrackMeters: 660, pathLengthMeters: 21000, phaseMeters: 8600),
-        FlightSeed(id: "DEMO08", callsign: "KLM18Z", trackDegrees: 14, speedMetersPerSecond: 50, heightAboveGroundMeters: 540, crossTrackMeters: -380, pathLengthMeters: 15000, phaseMeters: 7050),
-        FlightSeed(id: "DEMO09", callsign: "EDW350", trackDegrees: 286, speedMetersPerSecond: 44, heightAboveGroundMeters: 420, crossTrackMeters: 90, pathLengthMeters: 13000, phaseMeters: 5580),
-        FlightSeed(id: "DEMO10", callsign: "UAL89", trackDegrees: 42, speedMetersPerSecond: 78, heightAboveGroundMeters: 1180, crossTrackMeters: -760, pathLengthMeters: 22000, phaseMeters: 13400)
-    ]
-}
+    private func reconfigureFlightProvider(force: Bool = false) {
+        aircraftProvider.update(observer: observer, source: flightDataSource, force: force)
+    }
 
-private struct FlightSeed {
-    let id: String
-    let callsign: String
-    let trackDegrees: Double
-    let speedMetersPerSecond: Double
-    let heightAboveGroundMeters: Double
-    let crossTrackMeters: Double
-    let pathLengthMeters: Double
-    let phaseMeters: Double
+    private func publishCurrentAircraft() {
+        let current = currentAircraft()
+        aircraft = current
+        if let selectedAircraftID, !current.contains(where: { $0.id == selectedAircraftID }) {
+            self.selectedAircraftID = nil
+        }
+    }
+
+    private func scale(forAircraftLengthMeters lengthMeters: Double) -> SIMD3<Float> {
+        let scale = Float(max(lengthMeters, 1) / Self.importedAircraftLengthMeters)
+        return SIMD3<Float>(repeating: scale)
+    }
 }

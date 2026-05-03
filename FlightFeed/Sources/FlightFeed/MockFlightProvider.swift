@@ -2,7 +2,7 @@ import Foundation
 
 /// Deterministic provider for offline / test use. Returns a fixed set of
 /// flights placed on a circle around the region centre, slowly rotating.
-public final class MockFlightProvider: FlightProvider, @unchecked Sendable {
+public final class MockFlightProvider: FlightProvider, Sendable {
 
     private let count: Int
     private let startDate: Date

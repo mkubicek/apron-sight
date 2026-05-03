@@ -1,6 +1,6 @@
 import Foundation
 
-public struct GeoCoordinate: Equatable, Sendable {
+public struct GeoCoordinate: Equatable, Hashable, Sendable {
     public var latitudeDegrees: Double
     public var longitudeDegrees: Double
     public var altitudeMeters: Double

@@ -16,7 +16,7 @@ struct ContentView: View {
                 Text("apron-sight")
                     .font(.largeTitle.weight(.semibold))
 
-                Text(model.target.callsign)
+                Text(model.primaryAircraft.callsign)
                     .font(.title3)
                     .foregroundStyle(.secondary)
 
@@ -32,9 +32,9 @@ struct ContentView: View {
                 }
 
                 Button {
-                    model.resetAircraftPositions()
+                    model.refreshFlights()
                 } label: {
-                    Label("Reset Aircraft", systemImage: "arrow.counterclockwise.circle")
+                    Label("Refresh Flights", systemImage: "arrow.counterclockwise.circle")
                 }
 
                 Text(statusMessage)
@@ -97,6 +97,16 @@ private struct DebugPanel: View {
                     .font(.title2.weight(.semibold))
 
                 VStack(alignment: .leading, spacing: 12) {
+                    Text("Location")
+                        .font(.headline)
+
+                    Picker("Preset", selection: locationPresetBinding) {
+                        ForEach(LocationPresetOption.allCases) { option in
+                            Text(option.title).tag(option)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
                     CoordinateField(title: "Observer lat", value: $model.observerLatitude, fractionDigits: 6)
                     CoordinateField(title: "Observer lon", value: $model.observerLongitude, fractionDigits: 6)
                     CoordinateField(title: "Observer alt", value: $model.observerAltitude, fractionDigits: 1)
@@ -104,13 +114,37 @@ private struct DebugPanel: View {
 
                 Divider()
 
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Flight source")
+                        .font(.headline)
+
+                    Picker("Source", selection: $model.flightDataSource) {
+                        ForEach(FlightDataSource.allCases) { source in
+                            Text(source.title).tag(source)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    DebugRow(title: "Aircraft", value: Double(model.aircraft.count), suffix: "", fractionDigits: 0)
+                    if let age = model.flightSnapshotAgeSeconds {
+                        DebugRow(title: "Snapshot age", value: age, suffix: "s", fractionDigits: 1)
+                    }
+                    if let error = model.lastFlightError {
+                        Text(error)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                Divider()
+
                 VStack(alignment: .leading, spacing: 8) {
-                    DebugRow(title: "Target lat", value: model.targetCoordinate.latitudeDegrees, suffix: "deg", fractionDigits: 6)
-                    DebugRow(title: "Target lon", value: model.targetCoordinate.longitudeDegrees, suffix: "deg", fractionDigits: 6)
-                    DebugRow(title: "Target alt", value: model.targetCoordinate.altitudeMeters, suffix: "m", fractionDigits: 1)
+                    DebugRow(title: "Primary lat", value: model.targetCoordinate.latitudeDegrees, suffix: "deg", fractionDigits: 6)
+                    DebugRow(title: "Primary lon", value: model.targetCoordinate.longitudeDegrees, suffix: "deg", fractionDigits: 6)
+                    DebugRow(title: "Primary alt", value: model.targetCoordinate.altitudeMeters, suffix: "m", fractionDigits: 1)
                     DebugRow(title: "Observer ground", value: model.observerGroundElevationMeters, suffix: "m", fractionDigits: 1)
                     DebugRow(title: "Observer eye alt", value: model.observerAltitude, suffix: "m", fractionDigits: 1)
-                    DebugRow(title: "Target ground", value: model.targetGroundElevationMeters, suffix: "m", fractionDigits: 1)
+                    DebugRow(title: "Primary ground", value: model.targetGroundElevationMeters, suffix: "m", fractionDigits: 1)
                     DebugRow(title: "Aircraft ground", value: model.aircraftGroundElevationMeters, suffix: "m", fractionDigits: 1)
                     DebugRow(title: "Horizontal", value: model.placement.horizontalDistanceMeters, suffix: "m", fractionDigits: 1)
                     DebugRow(title: "Distance", value: model.placement.slantDistanceMeters, suffix: "m", fractionDigits: 1)
@@ -157,6 +191,13 @@ private struct DebugPanel: View {
                         DebugRow(title: "Height AGL", value: status.heightAboveGroundMeters, suffix: "m", fractionDigits: 1)
                         DebugRow(title: "Ground speed", value: status.groundSpeedMetersPerSecond, suffix: "m/s", fractionDigits: 1)
                         DebugRow(title: "Ground speed", value: status.groundSpeedMetersPerSecond * 3.6, suffix: "km/h", fractionDigits: 0)
+                        DebugRow(title: "Bearing", value: status.bearingDegrees, suffix: "deg", fractionDigits: 1)
+                        DebugRow(title: "Relative bearing", value: status.relativeBearingDegrees, suffix: "deg", fractionDigits: 1)
+                        DebugRow(title: "Elevation", value: status.elevationDegrees, suffix: "deg", fractionDigits: 1)
+                        DebugRow(title: "Vertical rate", value: status.verticalRateMetersPerSecond ?? 0, suffix: "m/s", fractionDigits: 1)
+                        if let originCountry = status.originCountry {
+                            TextRow(title: "Origin", value: originCountry)
+                        }
                     } else {
                         Text("Look at an aircraft and tap to select it.")
                             .font(.caption)
@@ -277,6 +318,13 @@ private struct DebugPanel: View {
         .padding(20)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var locationPresetBinding: Binding<LocationPresetOption> {
+        Binding(
+            get: { model.locationPresetOption },
+            set: { model.applyPresetOption($0) }
+        )
     }
 }
 
@@ -518,6 +566,20 @@ private struct DebugRow: View {
             Spacer()
             Text("\(value, format: .number.precision(.fractionLength(fractionDigits))) \(suffix)")
                 .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct TextRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value)
                 .foregroundStyle(.secondary)
         }
     }

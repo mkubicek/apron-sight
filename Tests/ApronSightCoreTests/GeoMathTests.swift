@@ -85,13 +85,70 @@ final class GeoMathTests: XCTestCase {
         XCTAssertEqual(placement.enu.up, 2, accuracy: 0.01)
     }
 
-    func testMockAircraftProviderIncludesTenDemoAircraft() {
-        let aircraft = MockAircraftProvider().aircraft()
+    func testDeadReckonedCoordinateMovesAlongTrack() {
+        let anchor = GeoCoordinate(latitudeDegrees: 47.4647, longitudeDegrees: 8.5492, altitudeMeters: 432)
 
-        XCTAssertEqual(aircraft.count, 10)
-        XCTAssertEqual(Set(aircraft.map(\.id)).count, 10)
-        XCTAssertTrue(aircraft.allSatisfy { ($0.velocityMetersPerSecond ?? 0) > 0 })
-        XCTAssertTrue(aircraft.allSatisfy { (30 ... 80).contains($0.velocityMetersPerSecond ?? 0) })
-        XCTAssertTrue(aircraft.allSatisfy { $0.trueTrackDegrees != nil })
+        let shifted = GeoMath.deadReckonedCoordinate(
+            from: anchor,
+            velocityMetersPerSecond: 100,
+            trueTrackDegrees: 90,
+            verticalRateMetersPerSecond: 2,
+            elapsedSeconds: 10
+        )
+        let placement = GeoMath.placement(observer: anchor, target: shifted)
+
+        XCTAssertEqual(placement.enu.east, 1000, accuracy: 0.5)
+        XCTAssertEqual(placement.enu.north, 0, accuracy: 0.5)
+        XCTAssertEqual(placement.enu.up, 20, accuracy: 0.1)
+    }
+
+    func testDeadReckoningElapsedSecondsIsBounded() {
+        let capturedAt = Date(timeIntervalSinceReferenceDate: 100)
+
+        XCTAssertEqual(
+            GeoMath.deadReckoningElapsedSeconds(capturedAt: capturedAt, date: capturedAt.addingTimeInterval(300)),
+            GeoMath.maximumDeadReckoningSeconds,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            GeoMath.deadReckoningElapsedSeconds(capturedAt: capturedAt, date: capturedAt.addingTimeInterval(-5)),
+            0,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testDeadReckonedCoordinateClampsStaleElapsedSeconds() {
+        let anchor = GeoCoordinate(latitudeDegrees: 47.4647, longitudeDegrees: 8.5492, altitudeMeters: 432)
+
+        let shifted = GeoMath.deadReckonedCoordinate(
+            from: anchor,
+            velocityMetersPerSecond: 250,
+            trueTrackDegrees: 0,
+            verticalRateMetersPerSecond: -1,
+            elapsedSeconds: 300
+        )
+        let placement = GeoMath.placement(observer: anchor, target: shifted)
+
+        XCTAssertEqual(placement.enu.north, 250 * GeoMath.maximumDeadReckoningSeconds, accuracy: 10)
+        XCTAssertEqual(placement.enu.east, 0, accuracy: 0.5)
+        XCTAssertEqual(shifted.altitudeMeters - anchor.altitudeMeters, -GeoMath.maximumDeadReckoningSeconds, accuracy: 0.000_001)
+    }
+
+    func testLocationPresetsExposeExpectedCoordinates() {
+        let home = LocationPreset.home.coordinate
+        let zrhObservationDeck = LocationPreset.zrhObservationDeck.coordinate
+        let zrhCenter = LocationPreset.zrhCenter.coordinate
+
+        XCTAssertEqual(home.latitudeDegrees, 47.333580, accuracy: 0.000_001)
+        XCTAssertEqual(home.longitudeDegrees, 8.519790, accuracy: 0.000_001)
+        XCTAssertEqual(home.altitudeMeters, 420, accuracy: 0.001)
+
+        XCTAssertEqual(zrhObservationDeck.latitudeDegrees, 47.451210, accuracy: 0.000_001)
+        XCTAssertEqual(zrhObservationDeck.longitudeDegrees, 8.557410, accuracy: 0.000_001)
+        XCTAssertEqual(zrhObservationDeck.altitudeMeters, 432, accuracy: 0.001)
+
+        XCTAssertEqual(zrhCenter.latitudeDegrees, 47.464700, accuracy: 0.000_001)
+        XCTAssertEqual(zrhCenter.longitudeDegrees, 8.549200, accuracy: 0.000_001)
+        XCTAssertEqual(zrhCenter.altitudeMeters, 432, accuracy: 0.001)
     }
 }

@@ -9,7 +9,7 @@ import Foundation
 /// Polling cadence note: the OpenSky anonymous tier strongly suggests
 /// no faster than 10s. Authenticated users can go to ~5s. This feed clamps to
 /// `minPollInterval`.
-public final class RadiusFlightFeed: @unchecked Sendable {
+public final class RadiusFlightFeed: Sendable {
 
     public typealias ErrorHandler = @Sendable (any Error) -> Void
 
@@ -55,7 +55,8 @@ public final class RadiusFlightFeed: @unchecked Sendable {
 
                     let elapsed = Date().timeIntervalSince(cycleStart)
                     let sleep = max(nextDelay - elapsed, minPollInterval)
-                    try? await Task.sleep(nanoseconds: UInt64(sleep * 1_000_000_000))
+                    let sleepMilliseconds = Int64(max((sleep * 1000).rounded(), 1))
+                    try? await Task.sleep(for: .milliseconds(sleepMilliseconds))
                 }
                 continuation.finish()
             }
