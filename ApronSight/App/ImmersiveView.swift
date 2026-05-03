@@ -20,6 +20,7 @@ final class ImmersiveSceneRenderer {
     weak var compassOverlay: Entity?
     weak var headAnchor: AnchorEntity?
     weak var selectionProxyRoot: Entity?
+    weak var selectionRing: ModelEntity?
     var aircraftEntitiesByID: [String: Entity] = [:]
     var aircraftVisualsByID: [String: Entity] = [:]
     var selectionProxyByAircraftID: [String: Entity] = [:]
@@ -32,6 +33,15 @@ struct ImmersiveView: View {
     private static let selectionProxyDistanceMeters: Float = 8
     private static let minimumSelectionProxyRadiusMeters: Float = 0.28
     private static let maximumSelectionProxyAngularRadiusDegrees = 6.0
+    private static let emptySpaceTargetName = "EmptySpaceTarget"
+    private static let emptySpaceShellHalfExtent: Float = 50
+    /// Half-angle the selection ring subtends at the user's eye. With distance
+    /// floor enforced, a far selected aircraft is always visible as a ~3°-wide
+    /// blue ring even when the detailed A350 model has shrunk below visibility.
+    private static let selectionRingMinAngularRadiusDegrees: Double = 1.5
+    /// Multiplier on `aircraftLengthMeters` for the ring radius at close range.
+    /// 0.6 means the ring is just larger than the aircraft model.
+    private static let selectionRingAircraftLengthFactor: Float = 0.6
 
     var body: some View {
         RealityView { content in
@@ -39,6 +49,13 @@ struct ImmersiveView: View {
             headAnchor.name = "HeadAnchor"
             content.add(headAnchor)
             renderer.headAnchor = headAnchor
+
+            // Catches taps that miss every selection proxy. Six head-anchored
+            // walls travel with the user, so an empty-sky pinch always lands
+            // here regardless of where the user has walked. Resolution to
+            // "deselect" happens in the gesture handler below.
+            let emptySpaceTarget = Self.makeEmptySpaceTarget()
+            headAnchor.addChild(emptySpaceTarget)
 
             let aircraftRoot = Entity()
             aircraftRoot.name = "AircraftRoot"
@@ -49,6 +66,12 @@ struct ImmersiveView: View {
             detailedAircraft.name = "DetailedAircraft"
             content.add(detailedAircraft)
             renderer.detailedAircraft = detailedAircraft
+
+            let selectionRing = Self.makeSelectionRing()
+            selectionRing.name = "SelectionRing"
+            selectionRing.isEnabled = false
+            content.add(selectionRing)
+            renderer.selectionRing = selectionRing
 
             let keyLight = Self.makeAircraftKeyLight()
             keyLight.name = "AircraftKeyLight"
@@ -108,17 +131,22 @@ struct ImmersiveView: View {
             SpatialTapGesture()
                 .targetedToAnyEntity()
                 .onEnded { value in
+                    // Drop taps that arrive before head pose is valid: better
+                    // a missed first tap than a tap routed through scene-origin
+                    // math when the user is somewhere else.
+                    guard let userPosition = Self.userPosition(renderer) else { return }
                     let tapPosition = value.convert(value.location3D, from: .local, to: .scene)
-                    let userPosition = renderer.headAnchor?.position(relativeTo: nil) ?? .zero
                     let aircraftList = model.currentAircraft()
-                    if let id = Self.aircraftID(
-                        from: value.entity,
+
+                    if let id = Self.selectedAircraftID(
                         tapPosition: tapPosition,
                         userPosition: userPosition,
                         model: model,
                         aircraftList: aircraftList
                     ) {
                         model.selectAircraft(id: id)
+                    } else if Self.isEmptySpaceTarget(value.entity) {
+                        model.clearSelectedAircraft()
                     }
                 }
         )
@@ -127,33 +155,55 @@ struct ImmersiveView: View {
     @MainActor
     private static func renderScene(model: AppModel, renderer: ImmersiveSceneRenderer) {
         let aircraftList = model.currentAircraft()
+        // Single source of truth for aircraft world positions this frame.
+        // Both the visual aircraft tree and the selection-proxy tree must use
+        // the same numbers, otherwise they can disagree by one frame and
+        // selection ends up referring to where the aircraft used to be.
+        let aircraftPositions = Dictionary(uniqueKeysWithValues:
+            aircraftList.map { ($0.id, model.realityPosition(for: $0)) }
+        )
         let referenceAircraft = aircraftList.first(where: { $0.id == model.selectedAircraftID })
             ?? aircraftList.first
             ?? DemoScenario.homeDemoAircraft
-        let referencePosition = model.realityPosition(for: referenceAircraft)
-        let userPosition = renderer.headAnchor?.position(relativeTo: nil) ?? .zero
+        let referencePosition = aircraftPositions[referenceAircraft.id]
+            ?? model.realityPosition(for: referenceAircraft)
         let referenceOrientation = simd_quatf(
             angle: Float(GeoMath.degreesToRadians(model.aircraftRealityYawDegrees(for: referenceAircraft))),
             axis: SIMD3<Float>(0, 1, 0)
         )
+
+        let userPosition = Self.userPosition(renderer)
 
         if let aircraftRoot = renderer.aircraftRoot {
             syncAircraftEntities(
                 in: aircraftRoot,
                 renderer: renderer,
                 aircraftList: aircraftList,
+                aircraftPositions: aircraftPositions,
                 detailedAircraftID: referenceAircraft.id,
                 model: model
             )
         }
 
-        if let selectionProxyRoot = renderer.selectionProxyRoot {
+        if let userPosition,
+           let selectionProxyRoot = renderer.selectionProxyRoot {
             syncSelectionProxyEntities(
                 in: selectionProxyRoot,
                 renderer: renderer,
                 aircraftList: aircraftList,
+                aircraftPositions: aircraftPositions,
                 userPosition: userPosition,
                 model: model
+            )
+        }
+
+        if let selectionRing = renderer.selectionRing {
+            updateSelectionRing(
+                ring: selectionRing,
+                model: model,
+                aircraftList: aircraftList,
+                aircraftPositions: aircraftPositions,
+                userPosition: userPosition
             )
         }
 
@@ -234,6 +284,7 @@ struct ImmersiveView: View {
         in root: Entity,
         renderer: ImmersiveSceneRenderer,
         aircraftList: [Aircraft],
+        aircraftPositions: [String: SIMD3<Float>],
         detailedAircraftID: String,
         model: AppModel
     ) {
@@ -249,7 +300,7 @@ struct ImmersiveView: View {
                 return newEntity
             }()
 
-            entity.position = model.realityPosition(for: aircraft)
+            entity.position = aircraftPositions[aircraft.id] ?? model.realityPosition(for: aircraft)
             entity.orientation = simd_quatf(
                 angle: Float(GeoMath.degreesToRadians(model.aircraftRealityYawDegrees(for: aircraft))),
                 axis: SIMD3<Float>(0, 1, 0)
@@ -274,6 +325,9 @@ struct ImmersiveView: View {
         root.name = "AircraftSelectionProxy:\(id)"
         root.components.set(InputTargetComponent())
         root.components.set(CollisionComponent(shapes: [.generateSphere(radius: Self.minimumSelectionProxyRadiusMeters)]))
+        // visionOS renders the system hover highlight while gaze is on the
+        // proxy. Free pre-commit feedback so the user sees what they'll select.
+        root.components.set(HoverEffectComponent())
         return root
     }
 
@@ -281,6 +335,7 @@ struct ImmersiveView: View {
         in root: Entity,
         renderer: ImmersiveSceneRenderer,
         aircraftList: [Aircraft],
+        aircraftPositions: [String: SIMD3<Float>],
         userPosition: SIMD3<Float>,
         model: AppModel
     ) {
@@ -295,7 +350,8 @@ struct ImmersiveView: View {
                 return newProxy
             }()
 
-            let aircraftVector = model.realityPosition(for: aircraft) - userPosition
+            let aircraftPosition = aircraftPositions[aircraft.id] ?? model.realityPosition(for: aircraft)
+            let aircraftVector = aircraftPosition - userPosition
             let aircraftDistance = simd_length(aircraftVector)
             guard aircraftDistance > 0.001 else {
                 proxy.isEnabled = false
@@ -342,8 +398,12 @@ struct ImmersiveView: View {
         return abs(next - cached) / max(cached, 1) >= 0.1
     }
 
-    private static func aircraftID(
-        from entity: Entity,
+    private static func userPosition(_ renderer: ImmersiveSceneRenderer) -> SIMD3<Float>? {
+        guard let anchor = renderer.headAnchor, anchor.isAnchored else { return nil }
+        return anchor.position(relativeTo: nil)
+    }
+
+    private static func selectedAircraftID(
         tapPosition: SIMD3<Float>,
         userPosition: SIMD3<Float>,
         model: AppModel,
@@ -361,23 +421,130 @@ struct ImmersiveView: View {
             tapPositionMeters: doubleVector(tapPosition),
             userPositionMeters: doubleVector(userPosition),
             candidates: candidates
-        ) ?? aircraftID(from: entity)
+        )
     }
 
-    private static func aircraftID(from entity: Entity) -> String? {
-        if entity.name.hasPrefix("Aircraft:") {
-            return String(entity.name.dropFirst("Aircraft:".count))
+    private static func isEmptySpaceTarget(_ entity: Entity) -> Bool {
+        entity.name == Self.emptySpaceTargetName
+    }
+
+    /// Builds a flat annulus in the X-Y plane (normal = +Z) with unit outer
+    /// radius. Sized at runtime via `entity.scale`. Triangles wound CCW from
+    /// +Z so the ring is front-facing toward the user once `+Z` is rotated
+    /// to point at them. Uses `SimpleMaterial` to match the transparent-ring
+    /// pattern already proven in `makeDistanceOverlay` / `makeGroundCursor`.
+    private static func makeSelectionRing() -> ModelEntity {
+        let segmentCount = 96
+        let outerRadius: Float = 1.0
+        let innerRadius: Float = 0.9
+        var positions: [SIMD3<Float>] = []
+        var indices: [UInt32] = []
+        positions.reserveCapacity((segmentCount + 1) * 2)
+        indices.reserveCapacity(segmentCount * 6)
+
+        for index in 0 ... segmentCount {
+            let angle = Float(index) * 2 * .pi / Float(segmentCount)
+            let direction = SIMD3<Float>(sin(angle), cos(angle), 0)
+            positions.append(direction * outerRadius)
+            positions.append(direction * innerRadius)
         }
 
-        if entity.name.hasPrefix("AircraftSelectionProxy:") {
-            return String(entity.name.dropFirst("AircraftSelectionProxy:".count))
+        for index in 0 ..< segmentCount {
+            let outerStart = UInt32(index * 2)
+            let innerStart = outerStart + 1
+            let outerEnd = outerStart + 2
+            let innerEnd = outerStart + 3
+            indices.append(contentsOf: [outerStart, innerStart, outerEnd])
+            indices.append(contentsOf: [outerEnd, innerStart, innerEnd])
         }
 
-        return entity.parent.flatMap { aircraftID(from: $0) }
+        var descriptor = MeshDescriptor()
+        descriptor.positions = MeshBuffers.Positions(positions)
+        descriptor.primitives = .triangles(indices)
+        let mesh = (try? MeshResource.generate(from: [descriptor])) ?? .generateBox(size: 1)
+
+        let material = SimpleMaterial(
+            color: UIColor.systemYellow.withAlphaComponent(0.85),
+            isMetallic: false
+        )
+        return ModelEntity(mesh: mesh, materials: [material])
+    }
+
+    /// Position, size, and orient the selection ring around the selected
+    /// aircraft. Hidden when nothing is selected, when the selected aircraft
+    /// has dropped out of the live feed, or before head pose is available.
+    @MainActor
+    private static func updateSelectionRing(
+        ring: ModelEntity,
+        model: AppModel,
+        aircraftList: [Aircraft],
+        aircraftPositions: [String: SIMD3<Float>],
+        userPosition: SIMD3<Float>?
+    ) {
+        guard let selectedID = model.selectedAircraftID,
+              aircraftList.contains(where: { $0.id == selectedID }),
+              let userPosition,
+              let aircraftPosition = aircraftPositions[selectedID]
+        else {
+            ring.isEnabled = false
+            return
+        }
+
+        let toUser = userPosition - aircraftPosition
+        let distance = simd_length(toUser)
+        guard distance > 0.001 else {
+            ring.isEnabled = false
+            return
+        }
+
+        let minAngularRadius = Float(GeoMath.degreesToRadians(Self.selectionRingMinAngularRadiusDegrees))
+        let minRadius = distance * tan(minAngularRadius)
+        let aircraftLengthRadius = Float(model.aircraftLengthMeters) * Self.selectionRingAircraftLengthFactor
+        let radius = max(aircraftLengthRadius, minRadius)
+
+        ring.position = aircraftPosition
+        ring.scale = SIMD3<Float>(repeating: radius)
+        ring.orientation = simd_quatf(from: SIMD3<Float>(0, 0, 1), to: simd_normalize(toUser))
+        ring.isEnabled = true
     }
 
     private static func doubleVector(_ vector: SIMD3<Float>) -> SIMD3<Double> {
         SIMD3<Double>(Double(vector.x), Double(vector.y), Double(vector.z))
+    }
+
+    /// Six head-anchored walls forming a cube around the user, sized big
+    /// enough that selection proxies (at 8m) always sit between the user and
+    /// the empty-space walls. visionOS picks the closest collision along the
+    /// gaze ray, so a tap only reaches these walls when no proxy is in the
+    /// gaze direction. Each wall carries the same name so the gesture handler
+    /// can identify any of them with a single string compare — no recursive
+    /// parent walk required.
+    private static func makeEmptySpaceTarget() -> Entity {
+        let root = Entity()
+        root.name = Self.emptySpaceTargetName
+        let halfExtent = Self.emptySpaceShellHalfExtent
+        let span = halfExtent * 2
+        let thickness: Float = 0.5
+
+        let walls: [(position: SIMD3<Float>, size: SIMD3<Float>)] = [
+            (SIMD3<Float>(0, 0, -halfExtent), SIMD3<Float>(span, span, thickness)),
+            (SIMD3<Float>(0, 0, halfExtent), SIMD3<Float>(span, span, thickness)),
+            (SIMD3<Float>(-halfExtent, 0, 0), SIMD3<Float>(thickness, span, span)),
+            (SIMD3<Float>(halfExtent, 0, 0), SIMD3<Float>(thickness, span, span)),
+            (SIMD3<Float>(0, halfExtent, 0), SIMD3<Float>(span, thickness, span)),
+            (SIMD3<Float>(0, -halfExtent, 0), SIMD3<Float>(span, thickness, span))
+        ]
+
+        for wall in walls {
+            let entity = Entity()
+            entity.name = Self.emptySpaceTargetName
+            entity.position = wall.position
+            entity.components.set(InputTargetComponent())
+            entity.components.set(CollisionComponent(shapes: [.generateBox(size: wall.size)]))
+            root.addChild(entity)
+        }
+
+        return root
     }
 
     private static func makeA350Marker() -> Entity {
