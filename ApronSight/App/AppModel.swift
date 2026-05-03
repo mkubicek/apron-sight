@@ -68,8 +68,8 @@ final class AppModel: ObservableObject {
     static let importedAircraftLengthMeters = 5.0
     static let demoMarkerLengthMeters = 8.0
     static let defaultObserverHeightAboveGroundMeters = 1.6
-    private static let selectionAngularRadiusDegrees = 1.2
-    private static let maximumSelectionRadiusMeters = 500.0
+    private static let selectionAngularRadiusDegrees = 2.5
+    private static let maximumSelectionRadiusMeters = 2_500.0
     private static let minimumMarkerAngularLengthDegrees = 0.9
 
     @Published var observerLatitude: Double {
@@ -391,8 +391,8 @@ final class AppModel: ObservableObject {
     }
 
     func selectionRadiusMeters(for aircraft: Aircraft) -> Double {
-        // Keep far targets gaze-selectable without letting large invisible
-        // spheres overlap whole approach streams.
+        // Far targets need enough angular area to gaze-select. Overlapping
+        // spheres are resolved by the renderer's angular tap tiebreaker.
         let distance = relativeDistanceMeters(for: aircraft)
         let angularRadius = distance * tan(GeoMath.degreesToRadians(Self.selectionAngularRadiusDegrees))
         return min(max(angularRadius, aircraftLengthMeters * 0.45, 24), Self.maximumSelectionRadiusMeters)

@@ -1,15 +1,6 @@
-import Combine
 import RealityKit
 import SwiftUI
 import UIKit
-
-/// Tracks the last text rendered into a text-bearing `ModelEntity` so the
-/// per-frame renderer can skip the (expensive) `MeshResource.generateText`
-/// call when nothing changed. Without this, regenerating compass + status
-/// text every frame dominates frame time.
-struct TextMeshCacheComponent: Component {
-    var lastText: String = ""
-}
 
 /// Holds per-`ImmersiveView` mutable state that has to outlive the SwiftUI
 /// struct: the per-frame `SceneEvents.Update` subscription token, plus
@@ -27,25 +18,14 @@ final class ImmersiveSceneRenderer {
     weak var groundCursor: Entity?
     weak var groundCursorLine: ModelEntity?
     weak var compassOverlay: Entity?
-    weak var frontCompass: Entity?
-    weak var compassNeedle: Entity?
-    weak var compassText: ModelEntity?
-    weak var statusWindow: Entity?
-    weak var statusText: ModelEntity?
-    weak var statusArrow: Entity?
-    weak var selectionProxyRoot: Entity?
     var aircraftEntitiesByID: [String: Entity] = [:]
     var aircraftVisualsByID: [String: Entity] = [:]
     var collisionRadiusByAircraftID: [String: Float] = [:]
-    var selectionProxyByAircraftID: [String: Entity] = [:]
-    var selectionProxyRadiusByAircraftID: [String: Float] = [:]
 }
 
 struct ImmersiveView: View {
     @ObservedObject var model: AppModel
     @State private var renderer = ImmersiveSceneRenderer()
-    private static let farSelectionProxyDistanceMeters: Float = 18
-    private static let farSelectionProxyAngularRadiusDegrees: Float = 1.6
 
     var body: some View {
         RealityView { content in
@@ -53,11 +33,6 @@ struct ImmersiveView: View {
             aircraftRoot.name = "AircraftRoot"
             content.add(aircraftRoot)
             renderer.aircraftRoot = aircraftRoot
-
-            let selectionProxyRoot = Entity()
-            selectionProxyRoot.name = "AircraftSelectionProxyRoot"
-            content.add(selectionProxyRoot)
-            renderer.selectionProxyRoot = selectionProxyRoot
 
             let detailedAircraft = Self.makeA350Marker()
             detailedAircraft.name = "DetailedAircraft"
@@ -103,21 +78,6 @@ struct ImmersiveView: View {
             content.add(compassOverlay)
             renderer.compassOverlay = compassOverlay
 
-            let frontCompass = Self.makeFrontCompassOverlay()
-            frontCompass.name = "FrontCompassOverlay"
-            content.add(frontCompass)
-            renderer.frontCompass = frontCompass
-            renderer.compassNeedle = frontCompass.findEntity(named: "FrontCompassNeedle")
-            renderer.compassText = frontCompass.findEntity(named: "FrontCompassText") as? ModelEntity
-
-            let statusWindow = Self.makeAircraftStatusWindow()
-            statusWindow.name = "AircraftStatusWindow"
-            statusWindow.isEnabled = false
-            content.add(statusWindow)
-            renderer.statusWindow = statusWindow
-            renderer.statusText = statusWindow.findEntity(named: "AircraftStatusText") as? ModelEntity
-            renderer.statusArrow = statusWindow.findEntity(named: "AircraftStatusArrow")
-
             // Per-frame entity updates run here, NOT in the SwiftUI `update:`
             // closure. That way render cadence is the visionOS frame rate
             // (90 Hz), independent of how often `@Published` properties on
@@ -132,7 +92,9 @@ struct ImmersiveView: View {
             SpatialTapGesture()
                 .targetedToAnyEntity()
                 .onEnded { value in
-                    if let id = Self.aircraftID(from: value.entity) {
+                    let tapPosition = value.convert(value.location3D, from: .local, to: .scene)
+                    let aircraftList = model.currentAircraft()
+                    if let id = Self.aircraftID(from: value.entity, tapPosition: tapPosition, model: model, aircraftList: aircraftList) {
                         model.selectAircraft(id: id)
                     }
                 }
@@ -154,15 +116,6 @@ struct ImmersiveView: View {
         if let aircraftRoot = renderer.aircraftRoot {
             syncAircraftEntities(
                 in: aircraftRoot,
-                renderer: renderer,
-                aircraftList: aircraftList,
-                model: model
-            )
-        }
-
-        if let selectionProxyRoot = renderer.selectionProxyRoot {
-            syncSelectionProxyEntities(
-                in: selectionProxyRoot,
                 renderer: renderer,
                 aircraftList: aircraftList,
                 model: model
@@ -229,34 +182,6 @@ struct ImmersiveView: View {
             )
             compassOverlay.isEnabled = model.showCompassOverlay
         }
-
-        if let frontCompass = renderer.frontCompass {
-            frontCompass.isEnabled = model.showCompassOverlay
-        }
-        if let needle = renderer.compassNeedle {
-            needle.orientation = simd_quatf(
-                angle: Float(GeoMath.degreesToRadians(model.relativeBearingDegrees)),
-                axis: SIMD3<Float>(0, 0, 1)
-            )
-        }
-        if let compassText = renderer.compassText {
-            updateCachedText(
-                on: compassText,
-                to: makeFrontCompassText(model: model),
-                font: .monospacedSystemFont(ofSize: 0.7, weight: .regular)
-            )
-        }
-
-        if let statusWindow = renderer.statusWindow,
-           let statusText = renderer.statusText {
-            updateAircraftStatusWindow(
-                window: statusWindow,
-                textEntity: statusText,
-                arrowEntity: renderer.statusArrow,
-                model: model,
-                aircraftList: aircraftList
-            )
-        }
     }
 
     private static func makeSelectableAircraftEntity(id: String) -> Entity {
@@ -271,14 +196,6 @@ struct ImmersiveView: View {
         visual.name = "AircraftVisual"
         root.addChild(visual)
 
-        return root
-    }
-
-    private static func makeSelectionProxyEntity(id: String) -> Entity {
-        let root = Entity()
-        root.name = "AircraftProxy:\(id)"
-        root.components.set(InputTargetComponent())
-        root.components.set(CollisionComponent(shapes: [.generateSphere(radius: 0.5)]))
         return root
     }
 
@@ -330,54 +247,6 @@ struct ImmersiveView: View {
         }
     }
 
-    private static func syncSelectionProxyEntities(
-        in root: Entity,
-        renderer: ImmersiveSceneRenderer,
-        aircraftList: [Aircraft],
-        model: AppModel
-    ) {
-        var activeAircraftIDs = Set<String>()
-
-        for aircraft in aircraftList {
-            activeAircraftIDs.insert(aircraft.id)
-            let proxy = renderer.selectionProxyByAircraftID[aircraft.id] ?? {
-                let newProxy = makeSelectionProxyEntity(id: aircraft.id)
-                root.addChild(newProxy)
-                renderer.selectionProxyByAircraftID[aircraft.id] = newProxy
-                return newProxy
-            }()
-
-            let aircraftPosition = model.realityPosition(for: aircraft)
-            let distance = simd_length(aircraftPosition)
-            guard distance > 0.001 else {
-                proxy.isEnabled = false
-                continue
-            }
-
-            let proxyDistance = min(distance, Self.farSelectionProxyDistanceMeters)
-            let radius = max(
-                Float(0.28),
-                proxyDistance * Float(tan(GeoMath.degreesToRadians(Double(Self.farSelectionProxyAngularRadiusDegrees))))
-            )
-            proxy.position = simd_normalize(aircraftPosition) * proxyDistance
-            if shouldUpdateCollisionRadius(
-                cached: renderer.selectionProxyRadiusByAircraftID[aircraft.id],
-                next: radius
-            ) {
-                proxy.components.set(CollisionComponent(shapes: [.generateSphere(radius: radius)]))
-                renderer.selectionProxyRadiusByAircraftID[aircraft.id] = radius
-            }
-            proxy.isEnabled = true
-        }
-
-        let staleAircraftIDs = Set(renderer.selectionProxyByAircraftID.keys).subtracting(activeAircraftIDs)
-        for aircraftID in staleAircraftIDs {
-            renderer.selectionProxyByAircraftID[aircraftID]?.removeFromParent()
-            renderer.selectionProxyByAircraftID[aircraftID] = nil
-            renderer.selectionProxyRadiusByAircraftID[aircraftID] = nil
-        }
-    }
-
     private static func shouldUpdateCollisionRadius(cached: Float?, next: Float) -> Bool {
         guard let cached else {
             return true
@@ -386,26 +255,17 @@ struct ImmersiveView: View {
         return abs(next - cached) / max(cached, 1) >= 0.1
     }
 
-    @MainActor
-    private static func updateCachedText(
-        on entity: ModelEntity,
-        to text: String,
-        font: UIFont,
-        extrusionDepth: Float = 0.01,
-        alignment: CTTextAlignment = .left
-    ) {
-        if entity.components[TextMeshCacheComponent.self]?.lastText == text {
-            return
-        }
-        entity.model?.mesh = MeshResource.generateText(
-            text,
-            extrusionDepth: extrusionDepth,
-            font: font,
-            containerFrame: .zero,
-            alignment: alignment,
-            lineBreakMode: .byClipping
-        )
-        entity.components.set(TextMeshCacheComponent(lastText: text))
+    private static func aircraftID(
+        from entity: Entity,
+        tapPosition: SIMD3<Float>,
+        model: AppModel,
+        aircraftList: [Aircraft]
+    ) -> String? {
+        aircraftIDClosestToTapDirection(
+            tapPosition: tapPosition,
+            model: model,
+            aircraftList: aircraftList
+        ) ?? aircraftID(from: entity)
     }
 
     private static func aircraftID(from entity: Entity) -> String? {
@@ -413,11 +273,47 @@ struct ImmersiveView: View {
             return String(entity.name.dropFirst("Aircraft:".count))
         }
 
-        if entity.name.hasPrefix("AircraftProxy:") {
-            return String(entity.name.dropFirst("AircraftProxy:".count))
+        return entity.parent.flatMap { aircraftID(from: $0) }
+    }
+
+    private static func aircraftIDClosestToTapDirection(
+        tapPosition: SIMD3<Float>,
+        model: AppModel,
+        aircraftList: [Aircraft]
+    ) -> String? {
+        let tapDistance = simd_length(tapPosition)
+        guard tapDistance > 0.001 else {
+            return nil
         }
 
-        return entity.parent.flatMap { aircraftID(from: $0) }
+        let tapDirection = simd_normalize(tapPosition)
+        var bestAircraftID: String?
+        var bestAngularDistance = Float.greatestFiniteMagnitude
+
+        for aircraft in aircraftList {
+            let aircraftPosition = model.realityPosition(for: aircraft)
+            let aircraftDistance = simd_length(aircraftPosition)
+            guard aircraftDistance > 0.001 else {
+                continue
+            }
+
+            let aircraftDirection = simd_normalize(aircraftPosition)
+            let dot = min(max(simd_dot(tapDirection, aircraftDirection), -1), 1)
+            let angularDistance = acos(dot)
+            let selectionRadius = Float(model.selectionRadiusMeters(for: aircraft))
+            let selectionAngularRadius = atan(selectionRadius / aircraftDistance)
+
+            guard angularDistance <= selectionAngularRadius else {
+                continue
+            }
+
+            if angularDistance < bestAngularDistance {
+                bestAngularDistance = angularDistance
+                bestAircraftID = aircraft.id
+            }
+        }
+
+        return bestAircraftID
     }
 
     private static func makeA350Marker() -> Entity {
@@ -590,97 +486,6 @@ struct ImmersiveView: View {
         return ModelEntity(mesh: .generateBox(size: 1), materials: [material])
     }
 
-    private static func makeAircraftStatusWindow() -> Entity {
-        let root = Entity()
-        let panelMaterial = SimpleMaterial(color: UIColor.black.withAlphaComponent(0.62), isMetallic: false)
-        let accentMaterial = SimpleMaterial(color: UIColor.systemYellow.withAlphaComponent(0.9), isMetallic: false)
-        let textMaterial = SimpleMaterial(color: UIColor.white, isMetallic: false)
-
-        let panel = ModelEntity(mesh: .generateBox(size: 1), materials: [panelMaterial])
-        panel.scale = SIMD3<Float>(1.24, 0.86, 0.025)
-        panel.position = SIMD3<Float>(0, 0, 0.02)
-        root.addChild(panel)
-
-        let accent = ModelEntity(mesh: .generateBox(size: 1), materials: [accentMaterial])
-        accent.scale = SIMD3<Float>(1.24, 0.035, 0.035)
-        accent.position = SIMD3<Float>(0, 0.41, -0.03)
-        root.addChild(accent)
-
-        let arrow = ModelEntity(mesh: .generateBox(size: 1), materials: [accentMaterial])
-        arrow.name = "AircraftStatusArrow"
-        arrow.scale = SIMD3<Float>(0.035, 0.16, 0.02)
-        arrow.position = SIMD3<Float>(0, 0.48, -0.05)
-        root.addChild(arrow)
-
-        let textMesh = MeshResource.generateText(
-            "NO AIRCRAFT",
-            extrusionDepth: 0.006,
-            font: .monospacedSystemFont(ofSize: 0.42, weight: .semibold),
-            containerFrame: .zero,
-            alignment: .left,
-            lineBreakMode: .byClipping
-        )
-        let text = ModelEntity(mesh: textMesh, materials: [textMaterial])
-        text.name = "AircraftStatusText"
-        text.position = SIMD3<Float>(-0.55, 0.22, -0.05)
-        text.scale = SIMD3<Float>(0.078, 0.078, 0.078)
-        text.components.set(TextMeshCacheComponent(lastText: "NO AIRCRAFT"))
-        root.addChild(text)
-
-        return root
-    }
-
-    @MainActor
-    private static func updateAircraftStatusWindow(
-        window: Entity,
-        textEntity: ModelEntity,
-        arrowEntity: Entity?,
-        model: AppModel,
-        aircraftList: [Aircraft]
-    ) {
-        guard
-            let selectedID = model.selectedAircraftID,
-            let aircraft = aircraftList.first(where: { $0.id == selectedID })
-        else {
-            window.isEnabled = false
-            return
-        }
-
-        let status = model.status(for: aircraft)
-
-        window.isEnabled = true
-        window.position = SIMD3<Float>(1.4, 1.45, -1.8)
-        window.scale = SIMD3<Float>(repeating: 1)
-        window.orientation = simd_quatf()
-
-        arrowEntity?.orientation = simd_quatf(
-            angle: -Float(GeoMath.degreesToRadians(status.relativeBearingDegrees)),
-            axis: SIMD3<Float>(0, 0, 1)
-        )
-
-        updateCachedText(
-            on: textEntity,
-            to: aircraftStatusText(status),
-            font: .monospacedSystemFont(ofSize: 0.42, weight: .semibold),
-            extrusionDepth: 0.006
-        )
-    }
-
-    private static func aircraftStatusText(_ status: AircraftStatus) -> String {
-        let origin = status.originCountry ?? "--"
-        let verticalRate = status.verticalRateMetersPerSecond ?? 0
-        return """
-        \(status.aircraft.callsign)
-        DIST \(Int(status.relativeDistanceMeters.rounded())) m
-        BRG  \(Int(status.bearingDegrees.rounded()))  REL \(Int(status.relativeBearingDegrees.rounded()))
-        ELEV \(Int(status.elevationDegrees.rounded())) deg
-        AGL  \(Int(status.heightAboveGroundMeters.rounded())) m
-        GS   \(Int((status.groundSpeedMetersPerSecond * 3.6).rounded())) km/h
-        VS   \(Int(verticalRate.rounded())) m/s
-        ORG  \(origin)
-        """
-    }
-
     private static func makeDistanceOverlay() -> Entity {
         let root = Entity()
         let ringMaterial = SimpleMaterial(color: UIColor.systemCyan.withAlphaComponent(0.25), isMetallic: false)
@@ -698,55 +503,6 @@ struct ImmersiveView: View {
 
         root.addChild(makeHorizontalLine(from: SIMD3<Float>(-500, 0, 0), to: SIMD3<Float>(500, 0, 0), thickness: 0.055, material: axisMaterial))
         root.addChild(makeHorizontalLine(from: SIMD3<Float>(0, 0, -500), to: SIMD3<Float>(0, 0, 500), thickness: 0.055, material: axisMaterial))
-
-        return root
-    }
-
-    private static func makeFrontCompassOverlay() -> Entity {
-        let root = Entity()
-        root.position = SIMD3<Float>(0, 1.55, -1.6)
-
-        let panelMaterial = SimpleMaterial(color: UIColor.black.withAlphaComponent(0.42), isMetallic: false)
-        let lineMaterial = SimpleMaterial(color: UIColor.white.withAlphaComponent(0.8), isMetallic: false)
-        let targetMaterial = SimpleMaterial(color: UIColor.systemYellow, isMetallic: false)
-        let textMaterial = SimpleMaterial(color: UIColor.white, isMetallic: false)
-
-        let panel = ModelEntity(mesh: .generateBox(size: 1), materials: [panelMaterial])
-        panel.scale = SIMD3<Float>(1.55, 0.72, 0.02)
-        panel.position = SIMD3<Float>(0, 0, 0.02)
-        root.addChild(panel)
-
-        let center = ModelEntity(mesh: .generateSphere(radius: 0.035), materials: [lineMaterial])
-        center.position = SIMD3<Float>(0, 0, -0.04)
-        root.addChild(center)
-
-        let forward = ModelEntity(mesh: .generateBox(size: 1), materials: [lineMaterial])
-        forward.scale = SIMD3<Float>(0.035, 0.32, 0.02)
-        forward.position = SIMD3<Float>(0, 0.16, -0.04)
-        root.addChild(forward)
-
-        let needle = ModelEntity(mesh: .generateBox(size: 1), materials: [targetMaterial])
-        needle.name = "FrontCompassNeedle"
-        needle.scale = SIMD3<Float>(0.045, 0.46, 0.025)
-        needle.position = SIMD3<Float>(0, 0, -0.06)
-        root.addChild(needle)
-
-        root.addChild(makePanelText("FORWARD", position: SIMD3<Float>(-0.64, 0.26, -0.06), material: textMaterial, scale: 0.18))
-        let initialCompassText = "YAW 0  TGT 0  REL 0"
-        let dynamicMesh = MeshResource.generateText(
-            initialCompassText,
-            extrusionDepth: 0.01,
-            font: .monospacedSystemFont(ofSize: 0.7, weight: .regular),
-            containerFrame: .zero,
-            alignment: .left,
-            lineBreakMode: .byClipping
-        )
-        let dynamicText = ModelEntity(mesh: dynamicMesh, materials: [textMaterial])
-        dynamicText.name = "FrontCompassText"
-        dynamicText.position = SIMD3<Float>(-0.66, -0.27, -0.06)
-        dynamicText.scale = SIMD3<Float>(0.16, 0.16, 0.16)
-        dynamicText.components.set(TextMeshCacheComponent(lastText: initialCompassText))
-        root.addChild(dynamicText)
 
         return root
     }
@@ -844,17 +600,5 @@ struct ImmersiveView: View {
         entity.position = position
         entity.scale = SIMD3<Float>(scale, scale, scale)
         return entity
-    }
-
-    private static func makePanelText(_ text: String, position: SIMD3<Float>, material: SimpleMaterial, scale: Float) -> ModelEntity {
-        let entity = makeTextLabel(text, position: position, material: material, scale: scale)
-        return entity
-    }
-
-    private static func makeFrontCompassText(model: AppModel) -> String {
-        let yaw = Int(model.yawOffsetDegrees.rounded())
-        let target = Int(model.placement.bearingDegrees.rounded())
-        let relative = Int(model.relativeBearingDegrees.rounded())
-        return "YAW \(yaw)  TGT \(target)  REL \(relative)"
     }
 }

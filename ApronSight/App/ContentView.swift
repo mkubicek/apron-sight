@@ -11,7 +11,7 @@ struct ContentView: View {
     @State private var statusMessage = "Immersive demo space closed"
 
     var body: some View {
-        HStack(alignment: .top, spacing: 32) {
+        HStack(alignment: .top, spacing: 24) {
             VStack(alignment: .leading, spacing: 20) {
                 Text("apron-sight")
                     .font(.largeTitle.weight(.semibold))
@@ -40,14 +40,16 @@ struct ContentView: View {
                 Text(statusMessage)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+
+                SelectedFlightPanel(model: model)
             }
-            .frame(maxWidth: 280, alignment: .leading)
+            .frame(minWidth: 330, maxWidth: 360, alignment: .leading)
 
             DebugPanel(model: model)
                 .frame(maxWidth: 430)
         }
         .padding(32)
-        .frame(minWidth: 760, minHeight: 560)
+        .frame(minWidth: 820, minHeight: 620)
         .task {
             model.startSimulation()
             await openImmersiveSpaceIfNeeded()
@@ -85,6 +87,232 @@ struct ContentView: View {
             statusMessage = "Unknown immersive space result"
         }
     }
+}
+
+private struct SelectedFlightPanel: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Selected flight")
+                    .font(.headline)
+
+                Spacer()
+
+                if model.selectedAircraftID != nil {
+                    Button {
+                        model.clearSelectedAircraft()
+                    } label: {
+                        Label("Clear", systemImage: "xmark.circle")
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+
+            if let status = model.selectedAircraftStatus {
+                AircraftPhotoView(aircraft: status.aircraft)
+
+                Text(status.aircraft.callsign)
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(1)
+
+                VStack(alignment: .leading, spacing: 7) {
+                    DebugRow(title: "Distance", value: status.relativeDistanceMeters, suffix: "m", fractionDigits: 0)
+                    DebugRow(title: "Bearing", value: status.bearingDegrees, suffix: "deg", fractionDigits: 1)
+                    DebugRow(title: "Relative bearing", value: status.relativeBearingDegrees, suffix: "deg", fractionDigits: 1)
+                    DebugRow(title: "Elevation", value: status.elevationDegrees, suffix: "deg", fractionDigits: 1)
+                    DebugRow(title: "Height AGL", value: status.heightAboveGroundMeters, suffix: "m", fractionDigits: 0)
+                    DebugRow(title: "Ground speed", value: status.groundSpeedMetersPerSecond * 3.6, suffix: "km/h", fractionDigits: 0)
+                    DebugRow(title: "Vertical rate", value: status.verticalRateMetersPerSecond ?? 0, suffix: "m/s", fractionDigits: 1)
+                    TextRow(title: "Origin", value: status.originCountry ?? "--")
+                    TextRow(title: "ICAO24", value: status.aircraft.id.uppercased())
+                }
+                .font(.caption)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Image(systemName: "airplane.circle")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+
+                    Text("Look at an aircraft and tap to select it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
+            }
+        }
+        .padding(16)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct AircraftPhotoView: View {
+    let aircraft: Aircraft
+
+    @State private var photo: AircraftPhoto?
+    @State private var isLoading = false
+    @State private var lookupCompleted = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(.secondary.opacity(0.12))
+
+                if let photo {
+                    AsyncImage(url: photo.imageURL) { phase in
+                        switch phase {
+                        case .empty:
+                            ProgressView()
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        case .failure:
+                            unavailablePhoto
+                        @unknown default:
+                            unavailablePhoto
+                        }
+                    }
+                } else if isLoading {
+                    ProgressView()
+                } else {
+                    unavailablePhoto
+                }
+            }
+            .frame(height: 150)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            if let photo {
+                let attribution = photo.photographer.map { "Photo: \($0)" } ?? "Photo: Planespotters.net"
+                Group {
+                    if let link = photo.link {
+                        Link(destination: link) {
+                            Label(attribution, systemImage: "link")
+                        }
+                    } else {
+                        Text(attribution)
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            } else if lookupCompleted {
+                Text("No aircraft photo found")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .task(id: aircraft.id) {
+            await loadPhoto()
+        }
+    }
+
+    private var unavailablePhoto: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "airplane")
+                .font(.title2)
+            Text("Aircraft photo unavailable")
+                .font(.caption2)
+        }
+        .foregroundStyle(.secondary)
+    }
+
+    @MainActor
+    private func loadPhoto() async {
+        photo = nil
+        lookupCompleted = false
+        guard AircraftPhotoLookup.icao24Hex(from: aircraft.id) != nil else {
+            isLoading = false
+            lookupCompleted = true
+            return
+        }
+
+        isLoading = true
+        photo = await AircraftPhotoLookup.photo(for: aircraft)
+        isLoading = false
+        lookupCompleted = true
+    }
+}
+
+private struct AircraftPhoto: Equatable {
+    let imageURL: URL
+    let link: URL?
+    let photographer: String?
+}
+
+private enum AircraftPhotoLookup {
+    static func photo(for aircraft: Aircraft) async -> AircraftPhoto? {
+        guard let hex = icao24Hex(from: aircraft.id),
+              let url = URL(string: "https://api.planespotters.net/pub/photos/hex/\(hex)")
+        else {
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("apron-sight/1.0", forHTTPHeaderField: "User-Agent")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  200 ..< 300 ~= httpResponse.statusCode
+            else {
+                return nil
+            }
+
+            let payload = try JSONDecoder().decode(PlanespottersPhotoResponse.self, from: data)
+            guard let firstPhoto = payload.photos.first,
+                  let imageURLString = firstPhoto.thumbnailLarge?.src ?? firstPhoto.thumbnail?.src,
+                  let imageURL = URL(string: imageURLString)
+            else {
+                return nil
+            }
+
+            return AircraftPhoto(
+                imageURL: imageURL,
+                link: firstPhoto.link.flatMap(URL.init(string:)),
+                photographer: firstPhoto.photographer
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    static func icao24Hex(from aircraftID: String) -> String? {
+        let hex = aircraftID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let allowed = CharacterSet(charactersIn: "0123456789abcdef")
+        guard hex.count == 6,
+              hex.unicodeScalars.allSatisfy({ allowed.contains($0) })
+        else {
+            return nil
+        }
+
+        return hex
+    }
+}
+
+private struct PlanespottersPhotoResponse: Decodable {
+    let photos: [PlanespottersPhoto]
+}
+
+private struct PlanespottersPhoto: Decodable {
+    let thumbnail: PlanespottersImage?
+    let thumbnailLarge: PlanespottersImage?
+    let link: String?
+    let photographer: String?
+
+    enum CodingKeys: String, CodingKey {
+        case thumbnail
+        case thumbnailLarge = "thumbnail_large"
+        case link
+        case photographer
+    }
+}
+
+private struct PlanespottersImage: Decodable {
+    let src: String?
 }
 
 private struct DebugPanel: View {
@@ -165,44 +393,6 @@ private struct DebugPanel: View {
                     CoordinateField(title: "Eye height", value: $model.observerHeightAboveGroundMeters, fractionDigits: 1)
                     TuningSlider(title: "Ground level", value: $model.groundCalibrationOffsetMeters, range: -20 ... 20, step: 0.1)
                     DebugRow(title: "Manual ground", value: model.observerGroundElevationMeters, suffix: "m", fractionDigits: 1)
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Selected aircraft")
-                            .font(.headline)
-                        Spacer()
-                        if model.selectedAircraftID != nil {
-                            Button {
-                                model.clearSelectedAircraft()
-                            } label: {
-                                Label("Clear", systemImage: "xmark.circle")
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                    }
-
-                    if let status = model.selectedAircraftStatus {
-                        Text(status.aircraft.callsign)
-                            .font(.title3.weight(.semibold))
-                        DebugRow(title: "Distance", value: status.relativeDistanceMeters, suffix: "m", fractionDigits: 1)
-                        DebugRow(title: "Height AGL", value: status.heightAboveGroundMeters, suffix: "m", fractionDigits: 1)
-                        DebugRow(title: "Ground speed", value: status.groundSpeedMetersPerSecond, suffix: "m/s", fractionDigits: 1)
-                        DebugRow(title: "Ground speed", value: status.groundSpeedMetersPerSecond * 3.6, suffix: "km/h", fractionDigits: 0)
-                        DebugRow(title: "Bearing", value: status.bearingDegrees, suffix: "deg", fractionDigits: 1)
-                        DebugRow(title: "Relative bearing", value: status.relativeBearingDegrees, suffix: "deg", fractionDigits: 1)
-                        DebugRow(title: "Elevation", value: status.elevationDegrees, suffix: "deg", fractionDigits: 1)
-                        DebugRow(title: "Vertical rate", value: status.verticalRateMetersPerSecond ?? 0, suffix: "m/s", fractionDigits: 1)
-                        if let originCountry = status.originCountry {
-                            TextRow(title: "Origin", value: originCountry)
-                        }
-                    } else {
-                        Text("Look at an aircraft and tap to select it.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 }
 
                 Divider()
