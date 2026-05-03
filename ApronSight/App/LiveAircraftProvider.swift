@@ -19,6 +19,7 @@ enum FlightDataSource: String, CaseIterable, Identifiable {
 
 final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
     private let liveFlightProvider: any FlightProvider
+    private let livePollInterval: TimeInterval
     private let mockFlightProvider = MockFlightProvider(count: 12)
     private let state = LiveAircraftProviderState()
     private var feedTask: Task<Void, Never>?
@@ -27,8 +28,14 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
 
     var errorHandler: (@MainActor (String?) -> Void)?
 
-    init(liveFlightProvider: (any FlightProvider)? = nil) {
-        self.liveFlightProvider = liveFlightProvider ?? OpenSkyClient.anonymous()
+    init(liveFlightProvider: (any FlightProvider)? = nil, livePollInterval: TimeInterval? = nil) {
+        if let liveFlightProvider {
+            self.liveFlightProvider = liveFlightProvider
+            self.livePollInterval = livePollInterval ?? 10
+        } else {
+            self.liveFlightProvider = OpenSkyConfiguration.makeLiveFlightProvider()
+            self.livePollInterval = livePollInterval ?? OpenSkyConfiguration.livePollIntervalSeconds
+        }
     }
 
     @MainActor
@@ -52,8 +59,8 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
         let feed = RadiusFlightFeed(
             provider: provider(for: source),
             region: region,
-            pollInterval: 10,
-            minPollInterval: source == .live ? 10 : 1
+            pollInterval: source == .live ? livePollInterval : 10,
+            minPollInterval: source == .live ? livePollInterval : 1
         ) { [weak self] error in
             guard self?.state.isCurrentGeneration(generation) == true else {
                 return

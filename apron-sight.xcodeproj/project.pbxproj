@@ -19,6 +19,7 @@
 		8B6A1F1E2D4C4A9187B0010A /* LocationPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B0002A /* LocationPreset.swift */; };
 		8B6A1F1E2D4C4A9187B0010B /* LiveAircraftProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B0002B /* LiveAircraftProvider.swift */; };
 		8B6A1F1E2D4C4A9187B0010C /* FlightFeed in Frameworks */ = {isa = PBXBuildFile; productRef = 8B6A1F1E2D4C4A9187B0002D /* FlightFeed */; };
+		8B6A1F1E2D4C4A9187B0010D /* OpenSkyConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B0002E /* OpenSkyConfiguration.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -35,6 +36,7 @@
 		8B6A1F1E2D4C4A9187B00029 /* A350_Qatar_CC_BY.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = Models/A350/Processed/A350_Qatar_CC_BY.usdz; sourceTree = "<group>"; };
 		8B6A1F1E2D4C4A9187B0002A /* LocationPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationPreset.swift; sourceTree = "<group>"; };
 		8B6A1F1E2D4C4A9187B0002B /* LiveAircraftProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveAircraftProvider.swift; sourceTree = "<group>"; };
+		8B6A1F1E2D4C4A9187B0002E /* OpenSkyConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenSkyConfiguration.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -74,6 +76,7 @@
 					8B6A1F1E2D4C4A9187B00020 /* ApronSightApp.swift */,
 					8B6A1F1E2D4C4A9187B00021 /* AppModel.swift */,
 					8B6A1F1E2D4C4A9187B0002B /* LiveAircraftProvider.swift */,
+					8B6A1F1E2D4C4A9187B0002E /* OpenSkyConfiguration.swift */,
 					8B6A1F1E2D4C4A9187B00022 /* ContentView.swift */,
 					8B6A1F1E2D4C4A9187B00023 /* ImmersiveView.swift */,
 				);
@@ -118,6 +121,7 @@
 				8B6A1F1E2D4C4A9187B00004 /* Sources */,
 				8B6A1F1E2D4C4A9187B00006 /* Frameworks */,
 				8B6A1F1E2D4C4A9187B00005 /* Resources */,
+				8B6A1F1E2D4C4A9187B00007 /* Copy Local OpenSky Credentials */,
 			);
 			buildRules = (
 			);
@@ -178,6 +182,28 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		8B6A1F1E2D4C4A9187B00007 /* Copy Local OpenSky Credentials */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy Local OpenSky Credentials";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nLOCAL_JSON=\"${SRCROOT}/Config/OpenSkyCredentials.local.json\"\nDOWNLOAD_JSON=\"${HOME}/Downloads/credentials.json\"\nSOURCE_JSON=\"\"\nif [ -f \"$LOCAL_JSON\" ]; then\n  SOURCE_JSON=\"$LOCAL_JSON\"\nelif [ -f \"$DOWNLOAD_JSON\" ]; then\n  SOURCE_JSON=\"$DOWNLOAD_JSON\"\nfi\nTARGET_JSON=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/OpenSkyCredentials.json\"\nif [ -n \"$SOURCE_JSON\" ]; then\n  mkdir -p \"$(dirname \"$TARGET_JSON\")\"\n  cp \"$SOURCE_JSON\" \"$TARGET_JSON\"\nelse\n  rm -f \"$TARGET_JSON\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		8B6A1F1E2D4C4A9187B00004 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -193,6 +219,7 @@
 					8B6A1F1E2D4C4A9187B00107 /* DemoScenario.swift in Sources */,
 					8B6A1F1E2D4C4A9187B00108 /* Aircraft.swift in Sources */,
 					8B6A1F1E2D4C4A9187B0010A /* LocationPreset.swift in Sources */,
+					8B6A1F1E2D4C4A9187B0010D /* OpenSkyConfiguration.swift in Sources */,
 				);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

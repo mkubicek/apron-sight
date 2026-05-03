@@ -8,7 +8,7 @@ import FoundationNetworking
 ///
 /// OpenSky offers three access tiers:
 ///   1. Anonymous   — no credentials, ~10s minimum poll, ~400 calls/day per IP.
-///   2. Basic auth  — legacy username/password, deprecated but still working.
+///   2. Basic auth  — legacy username/password, deprecated by OpenSky.
 ///   3. OAuth2 client credentials — current method, get a client ID/secret at
 ///      https://opensky-network.org/my-opensky/credentials.
 ///
@@ -93,7 +93,7 @@ public final class OpenSkyClient: FlightProvider, @unchecked Sendable {
         case 401, 403:
             throw FlightFeedError.authentication("status \(http.statusCode)")
         case 429:
-            let retry = (http.value(forHTTPHeaderField: "Retry-After") as NSString?)?.doubleValue
+            let retry = retryAfterSeconds(from: http)
             throw FlightFeedError.rateLimited(retryAfter: retry)
         default:
             let body = String(data: data, encoding: .utf8)
@@ -106,6 +106,24 @@ public final class OpenSkyClient: FlightProvider, @unchecked Sendable {
             region.contains(latitude: $0.latitudeDegrees, longitude: $0.longitudeDegrees)
         }
         return FlightSnapshot(flights: filtered, capturedAt: parsed.capturedAt, region: region)
+    }
+
+    private func retryAfterSeconds(from response: HTTPURLResponse) -> TimeInterval? {
+        let headerNames = [
+            "X-Rate-Limit-Retry-After-Seconds",
+            "Retry-After"
+        ]
+        for headerName in headerNames {
+            guard let value = response.value(forHTTPHeaderField: headerName) else {
+                continue
+            }
+
+            if let seconds = TimeInterval(value) {
+                return seconds
+            }
+        }
+
+        return nil
     }
 
     // MARK: - Auth
