@@ -448,6 +448,22 @@ final class AppModel: ObservableObject {
         return GeoMath.normalizedDegrees(yawOffsetDegrees - track + aircraftYawOffsetDegrees)
     }
 
+    /// Pitch angle the aircraft model should display, derived from the
+    /// reported vertical rate and ground speed: `atan2(verticalRate,
+    /// groundSpeed)`. Positive values mean nose-up (climbing). Clamped
+    /// to ±`maxPitchDegrees` because OpenSky's vertical rate is sampled
+    /// from short-window altitude deltas and can spike well past
+    /// realistic airframe pitch in turbulent or low-quality data.
+    func aircraftRealityPitchDegrees(for aircraft: Aircraft) -> Double {
+        let vertical = aircraft.verticalRateMetersPerSecond ?? 0
+        let horizontal = aircraft.velocityMetersPerSecond ?? 0
+        guard horizontal > 1.0 else { return 0 }
+        let pitch = GeoMath.radiansToDegrees(atan2(vertical, horizontal))
+        return min(max(pitch, -Self.maxPitchDegrees), Self.maxPitchDegrees)
+    }
+
+    private static let maxPitchDegrees: Double = 18
+
     func status(for aircraft: Aircraft) -> AircraftStatus {
         let placement = placement(for: aircraft)
         return AircraftStatus(

@@ -177,10 +177,7 @@ struct ImmersiveView: View {
             ?? DemoScenario.homeDemoAircraft
         let referencePosition = aircraftPositions[referenceAircraft.id]
             ?? model.realityPosition(for: referenceAircraft)
-        let referenceOrientation = simd_quatf(
-            angle: Float(GeoMath.degreesToRadians(model.aircraftRealityYawDegrees(for: referenceAircraft))),
-            axis: SIMD3<Float>(0, 1, 0)
-        )
+        let referenceOrientation = Self.aircraftOrientation(for: referenceAircraft, model: model)
 
         let userPosition = Self.userPosition(renderer)
 
@@ -311,10 +308,7 @@ struct ImmersiveView: View {
             }()
 
             entity.position = aircraftPositions[aircraft.id] ?? model.realityPosition(for: aircraft)
-            entity.orientation = simd_quatf(
-                angle: Float(GeoMath.degreesToRadians(model.aircraftRealityYawDegrees(for: aircraft))),
-                axis: SIMD3<Float>(0, 1, 0)
-            )
+            entity.orientation = Self.aircraftOrientation(for: aircraft, model: model)
 
             if let visual = renderer.aircraftVisualsByID[aircraft.id] {
                 visual.scale = model.markerVisualScale(for: aircraft)
@@ -552,6 +546,23 @@ struct ImmersiveView: View {
         }
 
         return root
+    }
+
+    /// Composes the aircraft's RealityKit orientation as yaw (around
+    /// world Y) times pitch (around local X). Pitch is applied first
+    /// in the local frame so the aircraft tilts in the direction of
+    /// travel rather than around a world-aligned axis. Both the
+    /// lightweight marker and the wrapping root of the textured A350
+    /// share this contract — the asset's internal 180° flip lives on
+    /// a child entity, so the wrapper's pitch axis still points along
+    /// world +X before yaw rotates it.
+    @MainActor
+    private static func aircraftOrientation(for aircraft: Aircraft, model: AppModel) -> simd_quatf {
+        let yawRadians = Float(GeoMath.degreesToRadians(model.aircraftRealityYawDegrees(for: aircraft)))
+        let pitchRadians = Float(GeoMath.degreesToRadians(model.aircraftRealityPitchDegrees(for: aircraft)))
+        let yaw = simd_quatf(angle: yawRadians, axis: SIMD3<Float>(0, 1, 0))
+        let pitch = simd_quatf(angle: pitchRadians, axis: SIMD3<Float>(1, 0, 0))
+        return yaw * pitch
     }
 
     private static func makeA350Marker() -> Entity {

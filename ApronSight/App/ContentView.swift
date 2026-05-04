@@ -49,13 +49,13 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(minWidth: 330, maxWidth: 360, alignment: .leading)
+            .frame(minWidth: 320, idealWidth: 380, maxWidth: 460, alignment: .leading)
 
             DebugPanel(model: model)
-                .frame(maxWidth: 430)
+                .frame(maxWidth: .infinity)
         }
         .padding(32)
-        .frame(minWidth: 820, minHeight: 620)
+        .frame(minWidth: 980, minHeight: 720)
         .task {
             model.startSimulation()
             await openImmersiveSpaceIfNeeded()
@@ -190,7 +190,7 @@ private struct AircraftPhotoView: View {
                     unavailablePhoto
                 }
             }
-            .frame(height: 150)
+            .frame(height: 200)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             if let photo {
@@ -451,6 +451,14 @@ private struct DebugPanel: View {
                     .foregroundStyle(.red)
             }
 
+            if model.locationPresetOption == .custom {
+                // 6-decimal precision is ≈0.11 m at the equator and
+                // <0.08 m at northern latitudes — well under the
+                // ±1 m target users want for a custom observer.
+                CoordinateField(title: "Observer lat", value: $model.observerLatitude, fractionDigits: 6)
+                CoordinateField(title: "Observer lon", value: $model.observerLongitude, fractionDigits: 6)
+            }
+
             CoordinateField(title: "Observer alt", value: $model.observerAltitude, fractionDigits: 1)
         }
 
@@ -665,7 +673,9 @@ private struct CompassCalibrationView: View {
             }
 
             CompassDial(model: model)
-                .frame(height: 180)
+                .aspectRatio(1, contentMode: .fit)
+                .frame(maxWidth: 380, maxHeight: 380)
+                .frame(maxWidth: .infinity, alignment: .center)
 
             VStack(alignment: .leading, spacing: 8) {
                 DebugRow(title: "Forward bearing", value: model.yawOffsetDegrees, suffix: "deg", fractionDigits: 0)
@@ -799,9 +809,19 @@ private struct CompassDial: View {
             center: center
         )
         let isSelected = aircraft.id == model.selectedAircraftID
+        let trackDegrees = aircraft.trueTrackDegrees
 
         Group {
-            if isSelected {
+            if let trackDegrees {
+                let relativeTrack = GeoMath.normalizedDegrees(trackDegrees - model.yawOffsetDegrees)
+                Image(systemName: "airplane")
+                    .font(.system(size: isSelected ? 18 : 11))
+                    .foregroundStyle(isSelected ? .yellow : .secondary)
+                    // SF Symbol "airplane" defaults to nose pointing
+                    // up-right at 45°; subtracting that puts a 0°
+                    // relative track straight up the dial.
+                    .rotationEffect(.degrees(relativeTrack - Self.airplaneSymbolDefaultRotationDegrees))
+            } else if isSelected {
                 Image(systemName: "airplane")
                     .font(.title3)
                     .foregroundStyle(.yellow)
@@ -812,7 +832,7 @@ private struct CompassDial: View {
             }
         }
         // Inflate the hit-test area to ~24 pt so dots near the rim of the
-        // dial are still tappable. The visible dot stays small.
+        // dial are still tappable. The visible glyph stays small.
         .frame(width: 24, height: 24)
         .contentShape(Rectangle())
         .position(position)
@@ -820,6 +840,8 @@ private struct CompassDial: View {
             model.selectAircraft(id: aircraft.id)
         }
     }
+
+    private static let airplaneSymbolDefaultRotationDegrees: Double = 45
 
     private func point(
         forBearing bearingDegrees: Double,
