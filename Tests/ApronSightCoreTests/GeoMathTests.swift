@@ -2,6 +2,36 @@ import XCTest
 @testable import ApronSightCore
 
 final class GeoMathTests: XCTestCase {
+    func testSceneBearingForwardIsZero() {
+        let bearing = GeoMath.sceneBearingDegrees(from: .zero, to: SIMD3<Float>(0, 0, -1))
+        XCTAssertEqual(bearing, 0, accuracy: 0.000_001)
+    }
+
+    func testSceneBearingRightIsNinety() {
+        let bearing = GeoMath.sceneBearingDegrees(from: .zero, to: SIMD3<Float>(1, 0, 0))
+        XCTAssertEqual(bearing, 90, accuracy: 0.000_001)
+    }
+
+    func testSceneBearingBackIsOneEighty() {
+        let bearing = GeoMath.sceneBearingDegrees(from: .zero, to: SIMD3<Float>(0, 0, 1))
+        XCTAssertEqual(bearing, 180, accuracy: 0.000_001)
+    }
+
+    func testSceneBearingLeftIsTwoSeventy() {
+        let bearing = GeoMath.sceneBearingDegrees(from: .zero, to: SIMD3<Float>(-1, 0, 0))
+        XCTAssertEqual(bearing, 270, accuracy: 0.000_001)
+    }
+
+    func testSceneBearingIsRelativeToFromPoint() {
+        // The user is at (5, 1.6, 5). The aircraft is one meter forward
+        // of them in scene coords. Bearing should still be 0°, not whatever
+        // the absolute coordinates would give.
+        let user = SIMD3<Float>(5, 1.6, 5)
+        let target = SIMD3<Float>(5, 1.6, 4)
+        let bearing = GeoMath.sceneBearingDegrees(from: user, to: target)
+        XCTAssertEqual(bearing, 0, accuracy: 0.000_001)
+    }
+
     func testSameCoordinateProducesZeroPlacement() {
         let coordinate = GeoCoordinate(latitudeDegrees: 47.333859, longitudeDegrees: 8.520262, altitudeMeters: 432)
 

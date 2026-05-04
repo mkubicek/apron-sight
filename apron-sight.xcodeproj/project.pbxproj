@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 60;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -15,11 +15,13 @@
 		8B6A1F1E2D4C4A9187B00106 /* GeoMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00025 /* GeoMath.swift */; };
 		8B6A1F1E2D4C4A9187B00107 /* DemoScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00026 /* DemoScenario.swift */; };
 		8B6A1F1E2D4C4A9187B00108 /* Aircraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00028 /* Aircraft.swift */; };
-		8B6A1F1E2D4C4A9187B00109 /* A350_Qatar_CC_BY.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00029 /* A350_Qatar_CC_BY.usdz */; };
+		8B6A1F1E2D4C4A9187B00109 /* Models/A350/Processed/A350_Qatar_CC_BY.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00029 /* Models/A350/Processed/A350_Qatar_CC_BY.usdz */; };
 		8B6A1F1E2D4C4A9187B0010A /* LocationPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B0002A /* LocationPreset.swift */; };
 		8B6A1F1E2D4C4A9187B0010B /* LiveAircraftProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B0002B /* LiveAircraftProvider.swift */; };
 		8B6A1F1E2D4C4A9187B0010C /* FlightFeed in Frameworks */ = {isa = PBXBuildFile; productRef = 8B6A1F1E2D4C4A9187B0002D /* FlightFeed */; };
 		8B6A1F1E2D4C4A9187B0010D /* OpenSkyConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B0002E /* OpenSkyConfiguration.swift */; };
+		8B6A1F1E2D4C4A9187B00111 /* CompassCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00031 /* CompassCalibration.swift */; };
+		8B6A1F1E2D4C4A9187B00113 /* GPSLocationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00033 /* GPSLocationProvider.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -33,10 +35,12 @@
 		8B6A1F1E2D4C4A9187B00026 /* DemoScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoScenario.swift; sourceTree = "<group>"; };
 		8B6A1F1E2D4C4A9187B00027 /* PLAN.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PLAN.md; sourceTree = "<group>"; };
 		8B6A1F1E2D4C4A9187B00028 /* Aircraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Aircraft.swift; sourceTree = "<group>"; };
-		8B6A1F1E2D4C4A9187B00029 /* A350_Qatar_CC_BY.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = Models/A350/Processed/A350_Qatar_CC_BY.usdz; sourceTree = "<group>"; };
+		8B6A1F1E2D4C4A9187B00029 /* Models/A350/Processed/A350_Qatar_CC_BY.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = Models/A350/Processed/A350_Qatar_CC_BY.usdz; sourceTree = "<group>"; };
 		8B6A1F1E2D4C4A9187B0002A /* LocationPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationPreset.swift; sourceTree = "<group>"; };
 		8B6A1F1E2D4C4A9187B0002B /* LiveAircraftProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveAircraftProvider.swift; sourceTree = "<group>"; };
 		8B6A1F1E2D4C4A9187B0002E /* OpenSkyConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenSkyConfiguration.swift; sourceTree = "<group>"; };
+		8B6A1F1E2D4C4A9187B00031 /* CompassCalibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompassCalibration.swift; sourceTree = "<group>"; };
+		8B6A1F1E2D4C4A9187B00033 /* GPSLocationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSLocationProvider.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -72,14 +76,15 @@
 		};
 		8B6A1F1E2D4C4A9187B00012 /* ApronSight/App */ = {
 			isa = PBXGroup;
-				children = (
-					8B6A1F1E2D4C4A9187B00020 /* ApronSightApp.swift */,
-					8B6A1F1E2D4C4A9187B00021 /* AppModel.swift */,
-					8B6A1F1E2D4C4A9187B0002B /* LiveAircraftProvider.swift */,
-					8B6A1F1E2D4C4A9187B0002E /* OpenSkyConfiguration.swift */,
-					8B6A1F1E2D4C4A9187B00022 /* ContentView.swift */,
-					8B6A1F1E2D4C4A9187B00023 /* ImmersiveView.swift */,
-				);
+			children = (
+				8B6A1F1E2D4C4A9187B00020 /* ApronSightApp.swift */,
+				8B6A1F1E2D4C4A9187B00021 /* AppModel.swift */,
+				8B6A1F1E2D4C4A9187B0002B /* LiveAircraftProvider.swift */,
+				8B6A1F1E2D4C4A9187B0002E /* OpenSkyConfiguration.swift */,
+				8B6A1F1E2D4C4A9187B00033 /* GPSLocationProvider.swift */,
+				8B6A1F1E2D4C4A9187B00022 /* ContentView.swift */,
+				8B6A1F1E2D4C4A9187B00023 /* ImmersiveView.swift */,
+			);
 			path = ApronSight/App;
 			sourceTree = "<group>";
 		};
@@ -87,11 +92,12 @@
 			isa = PBXGroup;
 			children = (
 				8B6A1F1E2D4C4A9187B00024 /* GeoCoordinate.swift */,
-					8B6A1F1E2D4C4A9187B00025 /* GeoMath.swift */,
-					8B6A1F1E2D4C4A9187B00026 /* DemoScenario.swift */,
-					8B6A1F1E2D4C4A9187B00028 /* Aircraft.swift */,
-					8B6A1F1E2D4C4A9187B0002A /* LocationPreset.swift */,
-				);
+				8B6A1F1E2D4C4A9187B00025 /* GeoMath.swift */,
+				8B6A1F1E2D4C4A9187B00026 /* DemoScenario.swift */,
+				8B6A1F1E2D4C4A9187B00028 /* Aircraft.swift */,
+				8B6A1F1E2D4C4A9187B0002A /* LocationPreset.swift */,
+				8B6A1F1E2D4C4A9187B00031 /* CompassCalibration.swift */,
+			);
 			path = Sources/ApronSightCore;
 			sourceTree = "<group>";
 		};
@@ -106,7 +112,7 @@
 		8B6A1F1E2D4C4A9187B00015 /* Assets */ = {
 			isa = PBXGroup;
 			children = (
-				8B6A1F1E2D4C4A9187B00029 /* A350_Qatar_CC_BY.usdz */,
+				8B6A1F1E2D4C4A9187B00029 /* Models/A350/Processed/A350_Qatar_CC_BY.usdz */,
 			);
 			path = Assets;
 			sourceTree = "<group>";
@@ -125,13 +131,13 @@
 			);
 			buildRules = (
 			);
-				dependencies = (
-				);
-				name = "apron-sight";
-				packageProductDependencies = (
-					8B6A1F1E2D4C4A9187B0002D /* FlightFeed */,
-				);
-				productName = "apron-sight";
+			dependencies = (
+			);
+			name = "apron-sight";
+			packageProductDependencies = (
+				8B6A1F1E2D4C4A9187B0002D /* FlightFeed */,
+			);
+			productName = "apron-sight";
 			productReference = 8B6A1F1E2D4C4A9187B00003 /* apron-sight.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -158,11 +164,11 @@
 				en,
 				Base,
 			);
-				mainGroup = 8B6A1F1E2D4C4A9187B00010;
-				packageReferences = (
-					8B6A1F1E2D4C4A9187B0002C /* XCLocalSwiftPackageReference "FlightFeed" */,
-				);
-				productRefGroup = 8B6A1F1E2D4C4A9187B00011 /* Products */;
+			mainGroup = 8B6A1F1E2D4C4A9187B00010;
+			packageReferences = (
+				8B6A1F1E2D4C4A9187B0002C /* XCLocalSwiftPackageReference "FlightFeed" */,
+			);
+			productRefGroup = 8B6A1F1E2D4C4A9187B00011 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -176,7 +182,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				8B6A1F1E2D4C4A9187B00109 /* A350_Qatar_CC_BY.usdz in Resources */,
+				8B6A1F1E2D4C4A9187B00109 /* Models/A350/Processed/A350_Qatar_CC_BY.usdz in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -208,19 +214,21 @@
 		8B6A1F1E2D4C4A9187B00004 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-				files = (
-					8B6A1F1E2D4C4A9187B00101 /* ApronSightApp.swift in Sources */,
-					8B6A1F1E2D4C4A9187B00102 /* AppModel.swift in Sources */,
-					8B6A1F1E2D4C4A9187B0010B /* LiveAircraftProvider.swift in Sources */,
-					8B6A1F1E2D4C4A9187B00103 /* ContentView.swift in Sources */,
-					8B6A1F1E2D4C4A9187B00104 /* ImmersiveView.swift in Sources */,
-					8B6A1F1E2D4C4A9187B00105 /* GeoCoordinate.swift in Sources */,
-					8B6A1F1E2D4C4A9187B00106 /* GeoMath.swift in Sources */,
-					8B6A1F1E2D4C4A9187B00107 /* DemoScenario.swift in Sources */,
-					8B6A1F1E2D4C4A9187B00108 /* Aircraft.swift in Sources */,
-					8B6A1F1E2D4C4A9187B0010A /* LocationPreset.swift in Sources */,
-					8B6A1F1E2D4C4A9187B0010D /* OpenSkyConfiguration.swift in Sources */,
-				);
+			files = (
+				8B6A1F1E2D4C4A9187B00101 /* ApronSightApp.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00102 /* AppModel.swift in Sources */,
+				8B6A1F1E2D4C4A9187B0010B /* LiveAircraftProvider.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00103 /* ContentView.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00104 /* ImmersiveView.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00105 /* GeoCoordinate.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00106 /* GeoMath.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00107 /* DemoScenario.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00108 /* Aircraft.swift in Sources */,
+				8B6A1F1E2D4C4A9187B0010A /* LocationPreset.swift in Sources */,
+				8B6A1F1E2D4C4A9187B0010D /* OpenSkyConfiguration.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00111 /* CompassCalibration.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00113 /* GPSLocationProvider.swift in Sources */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
@@ -342,11 +350,12 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = VB6WD3NGQ3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "apron-sight";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Used to set your observer position from GPS so live air traffic is placed correctly relative to where you are.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -372,11 +381,12 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = VB6WD3NGQ3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "apron-sight";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Used to set your observer position from GPS so live air traffic is placed correctly relative to where you are.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -418,7 +428,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-	/* End XCConfigurationList section */
+/* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
 		8B6A1F1E2D4C4A9187B0002C /* XCLocalSwiftPackageReference "FlightFeed" */ = {
@@ -434,6 +444,6 @@
 			productName = FlightFeed;
 		};
 /* End XCSwiftPackageProductDependency section */
-		};
+	};
 	rootObject = 8B6A1F1E2D4C4A9187B00001 /* Project object */;
 }

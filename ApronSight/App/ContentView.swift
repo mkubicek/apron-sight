@@ -324,6 +324,10 @@ private struct DebugPanel: View {
                 Text("Debug")
                     .font(.title2.weight(.semibold))
 
+                CompassCalibrationView(model: model)
+
+                Divider()
+
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Location")
                         .font(.headline)
@@ -335,8 +339,16 @@ private struct DebugPanel: View {
                     }
                     .pickerStyle(.segmented)
 
-                    CoordinateField(title: "Observer lat", value: $model.observerLatitude, fractionDigits: 6)
-                    CoordinateField(title: "Observer lon", value: $model.observerLongitude, fractionDigits: 6)
+                    if model.locationPresetOption == .gps {
+                        gpsStatusRow
+                    }
+
+                    if let error = model.lastLocationError {
+                        Text(error)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.red)
+                    }
+
                     CoordinateField(title: "Observer alt", value: $model.observerAltitude, fractionDigits: 1)
                 }
 
@@ -388,16 +400,11 @@ private struct DebugPanel: View {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Ground calibration")
+                    Text("Eye height")
                         .font(.headline)
                     CoordinateField(title: "Eye height", value: $model.observerHeightAboveGroundMeters, fractionDigits: 1)
-                    TuningSlider(title: "Ground level", value: $model.groundCalibrationOffsetMeters, range: -20 ... 20, step: 0.1)
                     DebugRow(title: "Manual ground", value: model.observerGroundElevationMeters, suffix: "m", fractionDigits: 1)
                 }
-
-                Divider()
-
-                CompassCalibrationView(model: model)
 
                 Divider()
 
@@ -415,8 +422,8 @@ private struct DebugPanel: View {
                     }
 
                     Toggle("Show cursor", isOn: $model.showGroundCursor)
-                    TuningSlider(title: "Left / Right", value: $model.groundCursorRightOffsetMeters, range: -500 ... 500, step: 0.1)
-                    TuningSlider(title: "Back / Forward", value: $model.groundCursorForwardOffsetMeters, range: -500 ... 500, step: 0.1)
+                    TuningWheel(title: "Left / Right", value: $model.groundCursorRightOffsetMeters, range: -500 ... 500, step: 0.1)
+                    TuningWheel(title: "Back / Forward", value: $model.groundCursorForwardOffsetMeters, range: -500 ... 500, step: 0.1)
                     DebugRow(title: "Cursor distance", value: model.groundCursorDistanceMeters, suffix: "m", fractionDigits: 1)
                     DebugRow(title: "Cursor bearing", value: model.groundCursorWorldBearingDegrees, suffix: "deg", fractionDigits: 1)
                     DebugRow(title: "Cursor ground", value: model.groundCursorCoordinate.altitudeMeters, suffix: "m", fractionDigits: 1)
@@ -448,9 +455,9 @@ private struct DebugPanel: View {
                         .buttonStyle(.borderless)
                     }
 
-                    TuningSlider(title: "East", value: $model.targetEastOffsetMeters, range: -500 ... 500, step: 0.1)
-                    TuningSlider(title: "North", value: $model.targetNorthOffsetMeters, range: -500 ... 500, step: 0.1)
-                    TuningSlider(title: "Altitude", value: $model.targetAltitudeOffsetMeters, range: -500 ... 500, step: 0.1)
+                    TuningWheel(title: "East", value: $model.targetEastOffsetMeters, range: -500 ... 500, step: 0.1)
+                    TuningWheel(title: "North", value: $model.targetNorthOffsetMeters, range: -500 ... 500, step: 0.1)
+                    TuningWheel(title: "Altitude", value: $model.targetAltitudeOffsetMeters, range: -500 ... 500, step: 0.1)
                 }
 
                 Divider()
@@ -459,9 +466,9 @@ private struct DebugPanel: View {
                     Text("Local aircraft tuning")
                         .font(.headline)
 
-                    TuningSlider(title: "Left / Right", value: $model.localRightOffsetMeters, range: -500 ... 500, step: 0.1)
-                    TuningSlider(title: "Back / Forward", value: $model.localForwardOffsetMeters, range: -500 ... 500, step: 0.1)
-                    AngleSlider(title: "Yaw offset", value: $model.aircraftYawOffsetDegrees, range: -180 ... 180, step: 0.1)
+                    TuningWheel(title: "Left / Right", value: $model.localRightOffsetMeters, range: -500 ... 500, step: 0.1)
+                    TuningWheel(title: "Back / Forward", value: $model.localForwardOffsetMeters, range: -500 ... 500, step: 0.1)
+                    AngleWheel(title: "Yaw offset", value: $model.aircraftYawOffsetDegrees, range: -180 ... 180, step: 0.1)
                 }
 
                 Divider()
@@ -486,23 +493,10 @@ private struct DebugPanel: View {
                         .buttonStyle(.borderless)
                     }
 
-                    TuningSlider(title: "Length", value: $model.aircraftLengthMeters, range: 2 ... 80, step: 0.1)
+                    TuningWheel(title: "Length", value: $model.aircraftLengthMeters, range: 2 ... 80, step: 0.1)
                     DebugRow(title: "A350-900 reference", value: AppModel.a350900LengthMeters, suffix: "m", fractionDigits: 1)
                 }
 
-                Divider()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(model.calibrationStatus)
-                        Spacer()
-                        Text("\(model.yawOffsetDegrees, format: .number.precision(.fractionLength(0))) deg")
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Slider(value: $model.yawOffsetDegrees, in: 0 ... 359, step: 1)
-                }
             }
         }
         .padding(20)
@@ -516,25 +510,60 @@ private struct DebugPanel: View {
             set: { model.applyPresetOption($0) }
         )
     }
+
+    @ViewBuilder
+    private var gpsStatusRow: some View {
+        switch model.gpsStatus {
+        case .idle:
+            EmptyView()
+        case .locating:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Locating…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        case .fixed:
+            HStack(spacing: 6) {
+                Image(systemName: "location.fill")
+                    .foregroundStyle(.green)
+                Text("GPS fix")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
 }
 
 private struct CompassCalibrationView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Compass calibration")
-                    .font(.headline)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Compass calibration")
+                .font(.title3.weight(.semibold))
 
-                Spacer()
+            HStack(spacing: 12) {
+                calibrationButton(
+                    axis: .yaw,
+                    title: "Calibrate Yaw",
+                    systemImage: "scope"
+                )
+                calibrationButton(
+                    axis: .altitude,
+                    title: "Calibrate Altitude",
+                    systemImage: "arrow.up.and.down"
+                )
+            }
 
-                Button {
-                    model.alignTargetStraightAhead()
-                } label: {
-                    Label("Target Ahead", systemImage: "scope")
-                }
-                .buttonStyle(.borderless)
+            if let armedAxis = model.armedCalibrationAxis {
+                Text(armedBannerText(for: armedAxis))
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.yellow)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.yellow.opacity(0.18))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
 
             CompassDial(
@@ -548,7 +577,54 @@ private struct CompassCalibrationView: View {
                 DebugRow(title: "Target bearing", value: model.placement.bearingDegrees, suffix: "deg", fractionDigits: 1)
                 DebugRow(title: "Relative target", value: model.relativeBearingDegrees, suffix: "deg", fractionDigits: 1)
             }
+
+            HStack {
+                Text(model.calibrationStatus)
+                Spacer()
+                Text("\(model.yawOffsetDegrees, format: .number.precision(.fractionLength(0))) deg")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+
+            AngleWheel(
+                title: "Manual yaw",
+                value: $model.yawOffsetDegrees,
+                range: 0 ... 359.9,
+                step: 0.1,
+                wraps: true
+            )
         }
+    }
+
+    private func armedBannerText(for axis: CalibrationAxis) -> String {
+        switch axis {
+        case .yaw:
+            return "Pinch on the real aircraft to calibrate yaw."
+        case .altitude:
+            return "Pinch on the real aircraft to calibrate altitude."
+        }
+    }
+
+    /// Prominent button: full-width, bordered-prominent style, large
+    /// control size. Disabled until an aircraft is selected (since both
+    /// axes use the selected aircraft as the calibration reference). When
+    /// this axis is armed, the button label flips to "Cancel".
+    private func calibrationButton(axis: CalibrationAxis, title: String, systemImage: String) -> some View {
+        let isThisAxisArmed = model.armedCalibrationAxis == axis
+        return Button {
+            if isThisAxisArmed {
+                model.disarmCalibration()
+            } else {
+                model.armCalibration(axis)
+            }
+        } label: {
+            Label(isThisAxisArmed ? "Cancel" : title, systemImage: systemImage)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .tint(isThisAxisArmed ? .red : .accentColor)
+        .disabled(model.selectedAircraftID == nil && !isThisAxisArmed)
     }
 }
 
@@ -616,92 +692,198 @@ private struct CompassDial: View {
     }
 }
 
-private struct TuningSlider: View {
+private struct TuningWheel: View {
     let title: String
     @Binding var value: Double
     let range: ClosedRange<Double>
     let step: Double
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(title)
-                Spacer()
-                Text("\(value, format: .number.precision(.fractionLength(1))) m")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-
-            Slider(value: clampedBinding, in: range, step: step)
-
-            NudgeControls(
-                value: $value,
-                range: range,
-                amounts: [-10, -1, -0.1, 0.1, 1, 10]
-            )
-        }
-    }
-
-    private var clampedBinding: Binding<Double> {
-        Binding(
-            get: { value },
-            set: { value = clamped($0) }
+        PrecisionWheelControl(
+            title: title,
+            value: $value,
+            range: range,
+            step: step,
+            unit: "m",
+            fractionDigits: 1,
+            nudgeAmounts: [-10, -1, -0.1, 0.1, 1, 10]
         )
-    }
-
-    private func clamped(_ newValue: Double) -> Double {
-        min(max(newValue, range.lowerBound), range.upperBound)
     }
 }
 
-private struct AngleSlider: View {
+private struct AngleWheel: View {
     let title: String
     @Binding var value: Double
     let range: ClosedRange<Double>
     let step: Double
+    var wraps = false
+
+    var body: some View {
+        PrecisionWheelControl(
+            title: title,
+            value: $value,
+            range: range,
+            step: step,
+            unit: "deg",
+            fractionDigits: 1,
+            nudgeAmounts: [-10, -1, -0.1, 0.1, 1, 10],
+            wraps: wraps
+        )
+    }
+}
+
+private struct PrecisionWheelControl: View {
+    let title: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+    let unit: String
+    let fractionDigits: Int
+    let nudgeAmounts: [Double]
+    var wraps = false
+
+    @State private var dragStartValue: Double?
+
+    private let wheelHeight: CGFloat = 46
+    private let tickSpacing: CGFloat = 10
+    private let visibleTickCount = 35
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(title)
                 Spacer()
-                Text("\(value, format: .number.precision(.fractionLength(1))) deg")
+                Text("\(value, format: .number.precision(.fractionLength(fractionDigits))) \(unit)")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
 
-            Slider(value: clampedBinding, in: range, step: step)
+            HStack(spacing: 8) {
+                wheelButton(systemImage: "minus", amount: -step)
+
+                wheelStrip
+
+                wheelButton(systemImage: "plus", amount: step)
+            }
 
             NudgeControls(
-                value: $value,
-                range: range,
-                amounts: [-10, -1, -0.1, 0.1, 1, 10]
+                value: adjustedBinding,
+                amounts: nudgeAmounts
             )
         }
     }
 
-    private var clampedBinding: Binding<Double> {
+    private var wheelStrip: some View {
+        GeometryReader { proxy in
+            let centerX = proxy.size.width / 2
+            let centerY = proxy.size.height / 2
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(.secondary.opacity(0.12))
+
+                ForEach(visibleTicks, id: \.self) { tick in
+                    let x = centerX + CGFloat(tick) * tickSpacing
+                    let tickValue = adjusted(value + Double(tick) * step)
+
+                    WheelTick(isMajor: isMajorTick(tickValue))
+                        .position(x: x, y: centerY)
+                }
+
+                Rectangle()
+                    .fill(.yellow)
+                    .frame(width: 3, height: 32)
+                    .position(x: centerX, y: centerY)
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { gesture in
+                        let startValue = dragStartValue ?? value
+                        dragStartValue = startValue
+                        let translation = dominantTranslation(gesture.translation)
+                        value = adjusted(startValue + translation * unitsPerPoint)
+                    }
+                    .onEnded { _ in
+                        dragStartValue = nil
+                    }
+            )
+        }
+        .frame(height: wheelHeight)
+        .accessibilityLabel(title)
+        .accessibilityValue("\(value, format: .number.precision(.fractionLength(fractionDigits))) \(unit)")
+    }
+
+    private func wheelButton(systemImage: String, amount: Double) -> some View {
+        Button {
+            value = adjusted(value + amount)
+        } label: {
+            Image(systemName: systemImage)
+                .frame(width: 24, height: 24)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+    }
+
+    private var adjustedBinding: Binding<Double> {
         Binding(
             get: { value },
-            set: { value = clamped($0) }
+            set: { value = adjusted($0) }
         )
     }
 
-    private func clamped(_ newValue: Double) -> Double {
-        min(max(newValue, range.lowerBound), range.upperBound)
+    private var unitsPerPoint: Double {
+        step * 0.35
+    }
+
+    private var visibleTicks: ClosedRange<Int> {
+        -(visibleTickCount / 2) ... (visibleTickCount / 2)
+    }
+
+    private func dominantTranslation(_ translation: CGSize) -> Double {
+        if abs(translation.width) > abs(translation.height) {
+            return Double(translation.width)
+        }
+
+        return Double(-translation.height)
+    }
+
+    private func adjusted(_ newValue: Double) -> Double {
+        let quantized = (newValue / step).rounded() * step
+        if wraps {
+            let normalized = GeoMath.normalizedDegrees(quantized)
+            return normalized >= 360 ? 0 : normalized
+        }
+
+        return min(max(quantized, range.lowerBound), range.upperBound)
+    }
+
+    private func isMajorTick(_ tickValue: Double) -> Bool {
+        let majorStep = unit == "deg" ? 5.0 : 1.0
+        let ratio = tickValue / majorStep
+        return abs(ratio.rounded() - ratio) < 0.000_1
+    }
+}
+
+private struct WheelTick: View {
+    let isMajor: Bool
+
+    var body: some View {
+        Rectangle()
+            .fill(isMajor ? Color.primary.opacity(0.75) : Color.secondary.opacity(0.45))
+            .frame(width: isMajor ? 2 : 1, height: isMajor ? 24 : 13)
     }
 }
 
 private struct NudgeControls: View {
     @Binding var value: Double
-    let range: ClosedRange<Double>
     let amounts: [Double]
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(amounts, id: \.self) { amount in
                 Button {
-                    value = clamped(value + amount)
+                    value += amount
                 } label: {
                     Text(label(for: amount))
                         .font(.caption.monospacedDigit())
@@ -711,10 +893,6 @@ private struct NudgeControls: View {
                 .controlSize(.small)
             }
         }
-    }
-
-    private func clamped(_ newValue: Double) -> Double {
-        min(max(newValue, range.lowerBound), range.upperBound)
     }
 
     private func label(for amount: Double) -> String {

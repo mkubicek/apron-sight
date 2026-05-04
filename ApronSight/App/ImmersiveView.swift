@@ -42,6 +42,8 @@ struct ImmersiveView: View {
     /// Multiplier on `aircraftLengthMeters` for the ring radius at close range.
     /// 0.6 means the ring is just larger than the aircraft model.
     private static let selectionRingAircraftLengthFactor: Float = 0.6
+    /// Ring colour for the selection ring around the picked aircraft.
+    private static let selectionRingDefaultColor = UIColor.systemYellow.withAlphaComponent(0.85)
 
     var body: some View {
         RealityView { content in
@@ -136,8 +138,16 @@ struct ImmersiveView: View {
                     // math when the user is somewhere else.
                     guard let userPosition = Self.userPosition(renderer) else { return }
                     let tapPosition = value.convert(value.location3D, from: .local, to: .scene)
-                    let aircraftList = model.currentAircraft()
 
+                    // When compass calibration is armed (yaw OR altitude),
+                    // the next pinch is the user pointing at the selected
+                    // aircraft in reality. Hijack before normal selection.
+                    if model.armedCalibrationAxis != nil {
+                        model.completeCalibration(tapPosition: tapPosition, userPosition: userPosition)
+                        return
+                    }
+
+                    let aircraftList = model.currentAircraft()
                     if let id = Self.selectedAircraftID(
                         tapPosition: tapPosition,
                         userPosition: userPosition,
@@ -463,10 +473,7 @@ struct ImmersiveView: View {
         descriptor.primitives = .triangles(indices)
         let mesh = (try? MeshResource.generate(from: [descriptor])) ?? .generateBox(size: 1)
 
-        let material = SimpleMaterial(
-            color: UIColor.systemYellow.withAlphaComponent(0.85),
-            isMetallic: false
-        )
+        let material = SimpleMaterial(color: Self.selectionRingDefaultColor, isMetallic: false)
         return ModelEntity(mesh: mesh, materials: [material])
     }
 

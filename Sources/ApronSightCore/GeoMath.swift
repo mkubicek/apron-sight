@@ -23,6 +23,16 @@ public enum GeoMath {
         return value
     }
 
+    /// Compass-style bearing from `from` to `to` in scene coordinates:
+    /// 0° at scene-forward (-Z), 90° at scene-right (+X). Result is in
+    /// `[0, 360)`. Used by the calibration gesture handler to translate
+    /// a 3D gaze hit into a yaw input for `CompassCalibration`.
+    public static func sceneBearingDegrees(from: SIMD3<Float>, to: SIMD3<Float>) -> Double {
+        let dx = Double(to.x - from.x)
+        let dz = Double(to.z - from.z)
+        return normalizedDegrees(radiansToDegrees(atan2(dx, -dz)))
+    }
+
     public static func ecefCoordinate(from coordinate: GeoCoordinate) -> ECEFCoordinate {
         let latitude = degreesToRadians(coordinate.latitudeDegrees)
         let longitude = degreesToRadians(coordinate.longitudeDegrees)

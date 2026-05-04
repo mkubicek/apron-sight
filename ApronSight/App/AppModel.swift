@@ -1,6 +1,27 @@
+import CoreLocation
 import Foundation
 import simd
 import SwiftUI
+
+/// Which axis of compass calibration is currently armed. The same gaze
+/// pinch is consumed differently depending on this value.
+enum CalibrationAxis: Equatable {
+    case yaw
+    case altitude
+}
+
+/// Current GPS provider state. `lastLocationError` carries the message for
+/// the error path; this enum just describes whether we have a fix or are
+/// still waiting. Orthogonal to the error state so a stale `.fixed` can
+/// coexist with a transient error string.
+enum GPSStatus: Equatable {
+    /// Not using the GPS preset.
+    case idle
+    /// GPS preset selected, awaiting first valid fix.
+    case locating
+    /// At least one valid fix received since the preset was activated.
+    case fixed
+}
 
 struct AircraftStatus {
     let aircraft: Aircraft
@@ -15,6 +36,7 @@ struct AircraftStatus {
 }
 
 enum LocationPresetOption: String, CaseIterable, Identifiable {
+    case gps
     case home
     case zrhObservationDeck
     case zrhCenter
@@ -24,6 +46,8 @@ enum LocationPresetOption: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .gps:
+            return "GPS"
         case .home:
             return "Home"
         case .zrhObservationDeck:
@@ -37,6 +61,8 @@ enum LocationPresetOption: String, CaseIterable, Identifiable {
 
     func preset(currentObserver: GeoCoordinate) -> LocationPreset {
         switch self {
+        case .gps:
+            return .gps
         case .home:
             return .home
         case .zrhObservationDeck:
@@ -50,6 +76,8 @@ enum LocationPresetOption: String, CaseIterable, Identifiable {
 
     static func option(for preset: LocationPreset) -> Self {
         switch preset {
+        case .gps:
+            return .gps
         case .home:
             return .home
         case .zrhObservationDeck:
@@ -82,7 +110,9 @@ final class AppModel: ObservableObject {
         didSet { observerCoordinateDidChange() }
     }
     @Published var observerHeightAboveGroundMeters: Double
-    @Published var yawOffsetDegrees: Double
+    @Published var yawOffsetDegrees: Double {
+        didSet { persistYawIfNeeded() }
+    }
     @Published var targetEastOffsetMeters: Double
     @Published var targetNorthOffsetMeters: Double
     @Published var targetAltitudeOffsetMeters: Double
@@ -90,7 +120,9 @@ final class AppModel: ObservableObject {
     @Published var localForwardOffsetMeters: Double
     @Published var aircraftYawOffsetDegrees: Double
     @Published var aircraftLengthMeters: Double
-    @Published var groundCalibrationOffsetMeters: Double
+    @Published var verticalCalibrationOffsetMeters: Double {
+        didSet { persistVerticalCalibrationIfNeeded() }
+    }
     @Published var showGroundCursor: Bool
     @Published var groundCursorRightOffsetMeters: Double
     @Published var groundCursorForwardOffsetMeters: Double
@@ -103,11 +135,21 @@ final class AppModel: ObservableObject {
     }
     @Published var locationPresetOption: LocationPresetOption
     @Published var lastFlightError: String?
+    @Published var lastLocationError: String?
+    @Published private(set) var gpsStatus: GPSStatus = .idle
+    /// When non-nil, the next gaze pinch in the immersive scene is consumed
+    /// as a calibration sample for the named axis (yaw or altitude) against
+    /// the currently selected aircraft. Nil = normal selection behavior.
+    @Published var armedCalibrationAxis: CalibrationAxis?
     @Published private(set) var aircraft: [Aircraft]
 
     private let aircraftProvider: LiveAircraftProvider
+    private let gpsProvider = GPSLocationProvider()
     private var flightUpdateTask: Task<Void, Never>?
+    private var calibrationDisarmTask: Task<Void, Never>?
+    private var gpsTimeoutTask: Task<Void, Never>?
     private var isApplyingPreset = false
+    private var isApplyingGPSUpdate = false
 
     init(
         observer: GeoCoordinate = DemoScenario.defaultObserver,
@@ -120,7 +162,7 @@ final class AppModel: ObservableObject {
         localForwardOffsetMeters: Double = 0,
         aircraftYawOffsetDegrees: Double = 0,
         aircraftLengthMeters: Double = AppModel.a350900LengthMeters,
-        groundCalibrationOffsetMeters: Double = 0,
+        verticalCalibrationOffsetMeters: Double = 0,
         showGroundCursor: Bool = true,
         groundCursorRightOffsetMeters: Double = 0,
         groundCursorForwardOffsetMeters: Double = 25,
@@ -128,8 +170,8 @@ final class AppModel: ObservableObject {
         showDistanceOverlay: Bool = true,
         showProjectionShadow: Bool = true,
         selectedAircraftID: String? = nil,
-        flightDataSource: FlightDataSource = .mock,
-        locationPresetOption: LocationPresetOption = .home,
+        flightDataSource: FlightDataSource = .live,
+        locationPresetOption: LocationPresetOption = .gps,
         aircraftProvider: LiveAircraftProvider? = nil
     ) {
         let resolvedAircraftProvider = aircraftProvider ?? LiveAircraftProvider()
@@ -146,7 +188,7 @@ final class AppModel: ObservableObject {
         self.localForwardOffsetMeters = localForwardOffsetMeters
         self.aircraftYawOffsetDegrees = aircraftYawOffsetDegrees
         self.aircraftLengthMeters = aircraftLengthMeters
-        self.groundCalibrationOffsetMeters = groundCalibrationOffsetMeters
+        self.verticalCalibrationOffsetMeters = verticalCalibrationOffsetMeters
         self.showGroundCursor = showGroundCursor
         self.groundCursorRightOffsetMeters = groundCursorRightOffsetMeters
         self.groundCursorForwardOffsetMeters = groundCursorForwardOffsetMeters
@@ -166,6 +208,24 @@ final class AppModel: ObservableObject {
 
             self.lastFlightError = message
         }
+
+        // Restore the last calibrated yaw and vertical offset for the
+        // current preset, if any. Swift does not fire property observers
+        // during a class's own initializer, so the persistence `didSet`
+        // won't run from these assignments.
+        let initialPreset = locationPresetOption.preset(currentObserver: observer)
+        if let key = initialPreset.calibrationStorageKey,
+           UserDefaults.standard.object(forKey: key) != nil {
+            self.yawOffsetDegrees = UserDefaults.standard.double(forKey: key)
+        }
+        if let verticalKey = initialPreset.verticalCalibrationStorageKey,
+           UserDefaults.standard.object(forKey: verticalKey) != nil {
+            self.verticalCalibrationOffsetMeters = UserDefaults.standard.double(forKey: verticalKey)
+        }
+
+        // Start GPS updates if the initial preset is `.gps`. Permission
+        // prompt fires here on first run.
+        updateGPSStatus()
     }
 
     var observer: GeoCoordinate {
@@ -177,7 +237,7 @@ final class AppModel: ObservableObject {
     }
 
     var observerGroundElevationMeters: Double {
-        observerAltitude - observerHeightAboveGroundMeters + groundCalibrationOffsetMeters
+        observerAltitude - observerHeightAboveGroundMeters + verticalCalibrationOffsetMeters
     }
 
     var observerGroundRealityPosition: SIMD3<Float> {
@@ -346,6 +406,10 @@ final class AppModel: ObservableObject {
     func realityPosition(for aircraft: Aircraft, includingTuning: Bool = true) -> SIMD3<Float> {
         let coordinate = GeoMath.localCoordinate(for: placement(for: aircraft), yawOffsetDegrees: yawOffsetDegrees)
         var position = SIMD3<Float>(Float(coordinate.x), Float(coordinate.y), Float(coordinate.z))
+        // Vertical calibration applies to aircraft AND ground equally, so the
+        // aircraft-to-ground geometry stays constant. `observerGroundElevationMeters`
+        // already includes this offset on the ground side.
+        position.y += Float(verticalCalibrationOffsetMeters)
         if includingTuning && aircraft.id == selectedAircraftID {
             position += localPlacementOffset
         }
@@ -435,8 +499,80 @@ final class AppModel: ObservableObject {
         groundCursorForwardOffsetMeters = 25
     }
 
-    func alignTargetStraightAhead() {
-        yawOffsetDegrees = placement.bearingDegrees.rounded()
+    /// Arms compass calibration on the named axis. The next gaze pinch in
+    /// the immersive scene is consumed by `completeCalibration(...)`,
+    /// which uses the selected aircraft's known WGS84 position as the
+    /// reference. Auto-disarms after 30 seconds so a stale arming can't
+    /// hijack a much later pinch. Defensive no-op when no aircraft is
+    /// selected — the UI button gate prevents this in normal use, this is
+    /// belt-and-suspenders for direct API callers.
+    func armCalibration(_ axis: CalibrationAxis) {
+        guard selectedAircraft != nil else { return }
+        calibrationDisarmTask?.cancel()
+        armedCalibrationAxis = axis
+        calibrationDisarmTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard !Task.isCancelled else { return }
+            self?.disarmCalibration()
+        }
+    }
+
+    func disarmCalibration() {
+        calibrationDisarmTask?.cancel()
+        calibrationDisarmTask = nil
+        armedCalibrationAxis = nil
+    }
+
+    /// Consumes a gaze pinch as a calibration sample for the currently
+    /// armed axis. Called from `ImmersiveView` whenever
+    /// `armedCalibrationAxis` is non-nil. Both axes use the selected
+    /// aircraft's known world bearing/altitude as the reference target
+    /// the user pinched at.
+    @MainActor
+    func completeCalibration(tapPosition: SIMD3<Float>, userPosition: SIMD3<Float>) {
+        guard let axis = armedCalibrationAxis,
+              let selected = selectedAircraft else {
+            disarmCalibration()
+            return
+        }
+
+        let placement = placement(for: selected)
+        let gazeX = Double(tapPosition.x - userPosition.x)
+        let gazeY = Double(tapPosition.y - userPosition.y)
+        let gazeZ = Double(tapPosition.z - userPosition.z)
+        let gazeHorizontal = sqrt(gazeX * gazeX + gazeZ * gazeZ)
+
+        guard gazeHorizontal > 0.1 else {
+            // Pinch was almost straight up or down — calibration math
+            // becomes singular for near-vertical gaze. Bail without
+            // changing yaw or altitude; let the user retry.
+            disarmCalibration()
+            return
+        }
+
+        switch axis {
+        case .yaw:
+            let gazeBearing = GeoMath.sceneBearingDegrees(from: userPosition, to: tapPosition)
+            yawOffsetDegrees = CompassCalibration.yaw(
+                forAircraftBearingDegrees: placement.bearingDegrees,
+                gazeBearingDegrees: gazeBearing
+            )
+
+        case .altitude:
+            // Move the entire vertical scene (aircraft AND ground) so the
+            // selected aircraft sits at the gaze elevation. Pure formula
+            // lives in `CompassCalibration.altitudeOffset(...)` so it can
+            // be tested without the renderer.
+            verticalCalibrationOffsetMeters = CompassCalibration.altitudeOffset(
+                aircraftYWithoutCalibration: placement.enu.up,
+                horizontalDistanceMeters: placement.horizontalDistanceMeters,
+                userY: Double(userPosition.y),
+                gazeY: gazeY,
+                gazeHorizontal: gazeHorizontal
+            )
+        }
+
+        disarmCalibration()
     }
 
     func applyPreset(_ preset: LocationPreset) {
@@ -445,9 +581,23 @@ final class AppModel: ObservableObject {
         observerLatitude = coordinate.latitudeDegrees
         observerLongitude = coordinate.longitudeDegrees
         observerAltitude = coordinate.altitudeMeters
-        groundCalibrationOffsetMeters = 0
+        verticalCalibrationOffsetMeters = 0
         locationPresetOption = LocationPresetOption.option(for: preset)
+
+        // If this preset has saved calibration values, restore them.
+        // Custom presets have no keys and keep whatever yaw / altitude
+        // the user had — they can recalibrate manually after moving.
+        if let key = preset.calibrationStorageKey,
+           UserDefaults.standard.object(forKey: key) != nil {
+            yawOffsetDegrees = UserDefaults.standard.double(forKey: key)
+        }
+        if let verticalKey = preset.verticalCalibrationStorageKey,
+           UserDefaults.standard.object(forKey: verticalKey) != nil {
+            verticalCalibrationOffsetMeters = UserDefaults.standard.double(forKey: verticalKey)
+        }
+
         isApplyingPreset = false
+        updateGPSStatus()
         reconfigureFlightProvider(force: true)
     }
 
@@ -510,6 +660,14 @@ final class AppModel: ObservableObject {
         guard !isApplyingPreset else {
             return
         }
+        // GPS updates write three properties (lat, lon, alt) per fix and
+        // each one fires this didSet. Skip entirely under that flag —
+        // `applyGPSLocation` issues a single `reconfigureFlightProvider`
+        // after all three writes settle, so we don't trigger 3× redundant
+        // provider updates per fix.
+        guard !isApplyingGPSUpdate else {
+            return
+        }
 
         locationPresetOption = .custom
         reconfigureFlightProvider()
@@ -530,5 +688,77 @@ final class AppModel: ObservableObject {
     private func scale(forAircraftLengthMeters lengthMeters: Double) -> SIMD3<Float> {
         let scale = Float(max(lengthMeters, 1) / Self.importedAircraftLengthMeters)
         return SIMD3<Float>(repeating: scale)
+    }
+
+    /// Persists `yawOffsetDegrees` for the current preset, unless we're
+    /// inside `applyPreset` (in which case the value we just set was loaded
+    /// from disk and a re-write is wasteful) or in custom mode (no key).
+    private func persistYawIfNeeded() {
+        guard !isApplyingPreset else { return }
+        let preset = locationPresetOption.preset(currentObserver: observer)
+        guard let key = preset.calibrationStorageKey else { return }
+        UserDefaults.standard.set(yawOffsetDegrees, forKey: key)
+    }
+
+    /// Persists `verticalCalibrationOffsetMeters` for the current preset,
+    /// using the same `isApplyingPreset` suppression as the yaw persistence.
+    private func persistVerticalCalibrationIfNeeded() {
+        guard !isApplyingPreset else { return }
+        let preset = locationPresetOption.preset(currentObserver: observer)
+        guard let key = preset.verticalCalibrationStorageKey else { return }
+        UserDefaults.standard.set(verticalCalibrationOffsetMeters, forKey: key)
+    }
+
+    /// Starts or stops the GPS provider based on the current preset. Called
+    /// from `init` and after every preset change. Idempotent — multiple
+    /// `start(...)` calls just rebind the callbacks. Also kicks off a
+    /// 60-second "no fix yet" timeout so the user sees an explicit error
+    /// instead of silently sitting on the fallback observer.
+    private func updateGPSStatus() {
+        gpsTimeoutTask?.cancel()
+        gpsTimeoutTask = nil
+
+        if locationPresetOption == .gps {
+            gpsStatus = .locating
+            lastLocationError = nil
+            gpsProvider.start(
+                onUpdate: { [weak self] location in
+                    self?.applyGPSLocation(location)
+                },
+                onError: { [weak self] error in
+                    self?.lastLocationError = error.localizedDescription
+                }
+            )
+            gpsTimeoutTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(60))
+                guard !Task.isCancelled, let self else { return }
+                if self.gpsStatus == .locating, self.lastLocationError == nil {
+                    self.lastLocationError = "GPS timed out. Move outdoors or check Settings → Privacy → Location."
+                }
+            }
+        } else {
+            gpsProvider.stop()
+            gpsStatus = .idle
+            lastLocationError = nil
+        }
+    }
+
+    /// Writes a fresh GPS coordinate into the observer fields without
+    /// flipping the preset to `.custom`. The `isApplyingGPSUpdate` flag
+    /// suppresses the auto-flip in `observerCoordinateDidChange`. Issues
+    /// a single `reconfigureFlightProvider` after all three writes settle
+    /// (the per-property didSets are skipped under the flag).
+    private func applyGPSLocation(_ location: CLLocation) {
+        isApplyingGPSUpdate = true
+        observerLatitude = location.coordinate.latitude
+        observerLongitude = location.coordinate.longitude
+        observerAltitude = location.altitude
+        isApplyingGPSUpdate = false
+
+        gpsStatus = .fixed
+        lastLocationError = nil
+        gpsTimeoutTask?.cancel()
+        gpsTimeoutTask = nil
+        reconfigureFlightProvider()
     }
 }

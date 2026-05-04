@@ -15,7 +15,7 @@ Three independent units, glued by the Xcode project:
 - `apron-sight.xcodeproj` — the visionOS app. **This is what actually runs on device.** Open in Xcode for app builds. A build phase copies `Config/OpenSkyCredentials.local.json` (gitignored) into the bundle so the live provider can authenticate.
 - `Package.swift` (repo root) — Swift package `ApronSightCore`. Pure math (`GeoMath`, `GeoCoordinate`, `Aircraft`, `DemoScenario`, `LocationPreset`, `AngularAircraftSelector`). No UIKit, no network, no RealityKit. Has unit tests.
 - `FlightFeed/Package.swift` — Swift package `FlightFeed`. OpenSky REST client, polling feed, mock provider. Cross-platform (macOS/iOS/visionOS). Imported by the app via `LiveAircraftProvider`.
-- `ApronSight/App/` — visionOS app sources (`AppModel`, `ContentView`, `ImmersiveView`, `LiveAircraftProvider`, `OpenSkyConfiguration`, `ApronSightApp`). Imports `ApronSightCore` and `FlightFeed`.
+- `ApronSight/App/` — visionOS app sources (`AppModel`, `ContentView`, `ImmersiveView`, `LiveAircraftProvider`, `GPSLocationProvider`, `OpenSkyConfiguration`, `ApronSightApp`). Imports `ApronSightCore` and `FlightFeed`.
 - `Assets/Models/A350/` — CC-BY A350 USDZ asset (see `docs/MODEL_ATTRIBUTION.md`).
 
 `ApronSightCore` is the only target the two packages and the app share. Anything that needs to be testable without RealityKit goes there.
@@ -61,7 +61,8 @@ Real device deployment needs a valid Apple development team in Xcode signing set
 - **Per-frame motion lives in the renderer, not in `@Published` state.** `ImmersiveView` subscribes to `SceneEvents.Update` (90 Hz) and calls `model.currentAircraft(at:)`, a pure function that dead-reckons each flight from the latest `FlightSnapshot` (bounded by `GeoMath.maximumDeadReckoningSeconds = 30s` so a stalled feed can't extrapolate aircraft off into the next country). The 1 Hz `runFlightUpdates` tick republishes `AppModel.aircraft` for SwiftUI consumers (debug panel, selected-aircraft lookup). Keep this split — don't drive RealityKit entities from `@Published` invalidation cycles.
 - **Aircraft positions resolve once per frame.** `renderScene` builds an `aircraftPositions: [String: SIMD3<Float>]` dict by calling `model.realityPosition(for:)` per aircraft once, then threads it into the visual aircraft sync, the selection-proxy sync, and the selection-ring update. Don't add a fourth caller that recomputes positions independently — they will drift by one frame.
 - **Detailed model is single-instance.** Only the selected (or primary) aircraft renders as the high-detail textured A350. Others use `makeLightweightAircraftMarker`. Don't change this without a perf reason — visionOS frame budget is tight.
-- **Calibration is manual.** No `CLHeading`, no compass APIs, no terrain DEM lookups. Yaw, eye-height, and ground-level offset are sliders. New calibration features should follow the same pattern.
+- **Compass calibration is user-initiated.** The "Calibrate Yaw" and "Calibrate Altitude" buttons in `CompassCalibrationView` arm a state, the user pinches at the real selected aircraft in the sky, and the math in `CompassCalibration.swift` solves for `yawOffsetDegrees` (yaw axis) or `verticalCalibrationOffsetMeters` (altitude axis). The altitude offset is applied to BOTH the rendered ground AND every aircraft's scene-Y in `realityPosition(for:)`, so the aircraft-above-ground geometry stays constant under altitude calibration. Eye height stays manual (it's a physical user property, not a calibration). No `CLHeading`, no compass APIs, no terrain DEM lookups. Both calibration axes persist per `LocationPreset` via `UserDefaults`.
+- **Location is preset-driven.** `LocationPresetOption` is the UI selector; `LocationPreset` is the core enum. `.gps` is the default; `GPSLocationProvider` (a `CLLocationManager` wrapper) writes live coordinates into `observerLatitude/Longitude/Altitude`. Switching to a non-GPS preset stops the provider. The first GPS activation triggers the system permission prompt.
 
 ## Selection pipeline
 
@@ -86,7 +87,7 @@ These are loose ends an agent should be aware of:
 
 ## Things to avoid
 
-- Don't add `CLLocationManager`, `CLHeading`, or any device-sensor heading code. The whole point of the calibration UI is that those don't work well enough for this use case yet.
+- Don't add `CLHeading` or any device-sensor heading code. The whole point of the compass calibration UI is that those don't work well enough for this use case yet. `CLLocationManager` IS allowed — it's used by `GPSLocationProvider` for the `.gps` location preset (one-axis position only, never heading).
 - Don't introduce a network dependency in `ApronSightCore`. It is intentionally pure.
 - Don't import RealityKit or UIKit from `FlightFeed`. It must stay cross-platform.
 - Don't commit Apple development team IDs, signing identities, or `Config/OpenSkyCredentials.local.json`.
