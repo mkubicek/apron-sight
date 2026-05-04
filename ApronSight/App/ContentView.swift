@@ -1,3 +1,4 @@
+import FlightFeed
 import Foundation
 import SwiftUI
 
@@ -12,36 +13,39 @@ struct ContentView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 24) {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("apron-sight")
-                    .font(.largeTitle.weight(.semibold))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("apron-sight")
+                        .font(.largeTitle.weight(.semibold))
 
-                Text(model.primaryAircraft.callsign)
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
+                    Text(model.primaryAircraft.callsign)
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
 
-                Button {
-                    Task {
-                        await toggleImmersiveSpace()
+                    Button {
+                        Task {
+                            await toggleImmersiveSpace()
+                        }
+                    } label: {
+                        Label(
+                            immersiveSpaceIsOpen ? "Close Demo Space" : "Open Demo Space",
+                            systemImage: immersiveSpaceIsOpen ? "xmark.circle" : "viewfinder.circle"
+                        )
                     }
-                } label: {
-                    Label(
-                        immersiveSpaceIsOpen ? "Close Demo Space" : "Open Demo Space",
-                        systemImage: immersiveSpaceIsOpen ? "xmark.circle" : "viewfinder.circle"
-                    )
+
+                    Button {
+                        model.refreshFlights()
+                    } label: {
+                        Label("Refresh Flights", systemImage: "arrow.counterclockwise.circle")
+                    }
+
+                    Text(statusMessage)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+
+                    SelectedFlightPanel(model: model)
                 }
-
-                Button {
-                    model.refreshFlights()
-                } label: {
-                    Label("Refresh Flights", systemImage: "arrow.counterclockwise.circle")
-                }
-
-                Text(statusMessage)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-
-                SelectedFlightPanel(model: model)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(minWidth: 330, maxWidth: 360, alignment: .leading)
 
@@ -116,6 +120,8 @@ private struct SelectedFlightPanel: View {
                 Text(status.aircraft.callsign)
                     .font(.title3.weight(.semibold))
                     .lineLimit(1)
+
+                FlightRouteView(callsign: status.aircraft.callsign)
 
                 VStack(alignment: .leading, spacing: 7) {
                     DebugRow(title: "Distance", value: status.relativeDistanceMeters, suffix: "m", fractionDigits: 0)
@@ -237,6 +243,43 @@ private struct AircraftPhotoView: View {
     }
 }
 
+/// Shows the origin and destination airport for the selected flight,
+/// looked up from adsbdb.com by callsign. Renders nothing while the
+/// lookup is in flight or if no route was found — the field is
+/// best-effort and many callsigns (GA, military, unscheduled) won't
+/// resolve.
+private struct FlightRouteView: View {
+    let callsign: String
+
+    @State private var route: FlightRoute?
+
+    var body: some View {
+        Group {
+            if let summary = route.flatMap(formatRoute) {
+                HStack(spacing: 6) {
+                    Image(systemName: "airplane.departure")
+                    Text(summary)
+                }
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+        }
+        .task(id: callsign) {
+            route = nil
+            let trimmed = callsign.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            route = await FlightRouteLookup.shared.route(forCallsign: trimmed)
+        }
+    }
+
+    private func formatRoute(_ route: FlightRoute) -> String? {
+        let origin = route.origin?.icao ?? route.origin?.iata
+        let destination = route.destination?.icao ?? route.destination?.iata
+        guard origin != nil || destination != nil else { return nil }
+        return "\(origin ?? "—") → \(destination ?? "—")"
+    }
+}
+
 private struct AircraftPhoto: Equatable {
     let imageURL: URL
     let link: URL?
@@ -315,193 +358,231 @@ private struct PlanespottersImage: Decodable {
     let src: String?
 }
 
+private enum DebugTab: String, CaseIterable, Identifiable {
+    case main
+    case world
+    case tuning
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .main: return "Main"
+        case .world: return "World"
+        case .tuning: return "Tuning"
+        }
+    }
+}
+
 private struct DebugPanel: View {
     @ObservedObject var model: AppModel
 
+    @State private var selectedTab: DebugTab = .main
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Debug")
-                    .font(.title2.weight(.semibold))
-
-                CompassCalibrationView(model: model)
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Location")
-                        .font(.headline)
-
-                    Picker("Preset", selection: locationPresetBinding) {
-                        ForEach(LocationPresetOption.allCases) { option in
-                            Text(option.title).tag(option)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    if model.locationPresetOption == .gps {
-                        gpsStatusRow
-                    }
-
-                    if let error = model.lastLocationError {
-                        Text(error)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.red)
-                    }
-
-                    CoordinateField(title: "Observer alt", value: $model.observerAltitude, fractionDigits: 1)
+        VStack(alignment: .leading, spacing: 14) {
+            Picker("", selection: $selectedTab) {
+                ForEach(DebugTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
                 }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
 
-                Divider()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Flight source")
-                        .font(.headline)
-
-                    Picker("Source", selection: $model.flightDataSource) {
-                        ForEach(FlightDataSource.allCases) { source in
-                            Text(source.title).tag(source)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    DebugRow(title: "Aircraft", value: Double(model.aircraft.count), suffix: "", fractionDigits: 0)
-                    if let age = model.flightSnapshotAgeSeconds {
-                        DebugRow(title: "Snapshot age", value: age, suffix: "s", fractionDigits: 1)
-                    }
-                    if let error = model.lastFlightError {
-                        Text(error)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.red)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    switch selectedTab {
+                    case .main:
+                        mainTab
+                    case .world:
+                        worldTab
+                    case .tuning:
+                        tuningTab
                     }
                 }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    DebugRow(title: "Primary lat", value: model.targetCoordinate.latitudeDegrees, suffix: "deg", fractionDigits: 6)
-                    DebugRow(title: "Primary lon", value: model.targetCoordinate.longitudeDegrees, suffix: "deg", fractionDigits: 6)
-                    DebugRow(title: "Primary alt", value: model.targetCoordinate.altitudeMeters, suffix: "m", fractionDigits: 1)
-                    DebugRow(title: "Observer ground", value: model.observerGroundElevationMeters, suffix: "m", fractionDigits: 1)
-                    DebugRow(title: "Observer eye alt", value: model.observerAltitude, suffix: "m", fractionDigits: 1)
-                    DebugRow(title: "Primary ground", value: model.targetGroundElevationMeters, suffix: "m", fractionDigits: 1)
-                    DebugRow(title: "Aircraft ground", value: model.aircraftGroundElevationMeters, suffix: "m", fractionDigits: 1)
-                    DebugRow(title: "Horizontal", value: model.placement.horizontalDistanceMeters, suffix: "m", fractionDigits: 1)
-                    DebugRow(title: "Distance", value: model.placement.slantDistanceMeters, suffix: "m", fractionDigits: 1)
-                    DebugRow(title: "Bearing", value: model.placement.bearingDegrees, suffix: "deg", fractionDigits: 1)
-                    DebugRow(title: "Elevation", value: model.placement.elevationDegrees, suffix: "deg", fractionDigits: 1)
-                    DebugRow(title: "Relative bearing", value: model.relativeBearingDegrees, suffix: "deg", fractionDigits: 1)
-                    DebugRow(title: "Aircraft yaw", value: model.aircraftRealityYawDegrees, suffix: "deg", fractionDigits: 1)
-                    DebugRow(title: "Tuned distance", value: model.tunedDistanceMeters, suffix: "m", fractionDigits: 1)
-                    DebugRow(title: "Aircraft length", value: model.aircraftLengthMeters, suffix: "m", fractionDigits: 1)
-                    DebugRow(title: "Visual length", value: model.estimatedAircraftAngularLengthDegrees, suffix: "deg", fractionDigits: 1)
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Eye height")
-                        .font(.headline)
-                    CoordinateField(title: "Eye height", value: $model.observerHeightAboveGroundMeters, fractionDigits: 1)
-                    DebugRow(title: "Manual ground", value: model.observerGroundElevationMeters, suffix: "m", fractionDigits: 1)
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Ground cursor")
-                            .font(.headline)
-                        Spacer()
-                        Button {
-                            model.resetGroundCursor()
-                        } label: {
-                            Label("Reset", systemImage: "arrow.counterclockwise")
-                        }
-                        .buttonStyle(.borderless)
-                    }
-
-                    Toggle("Show cursor", isOn: $model.showGroundCursor)
-                    TuningWheel(title: "Left / Right", value: $model.groundCursorRightOffsetMeters, range: -500 ... 500, step: 0.1)
-                    TuningWheel(title: "Back / Forward", value: $model.groundCursorForwardOffsetMeters, range: -500 ... 500, step: 0.1)
-                    DebugRow(title: "Cursor distance", value: model.groundCursorDistanceMeters, suffix: "m", fractionDigits: 1)
-                    DebugRow(title: "Cursor bearing", value: model.groundCursorWorldBearingDegrees, suffix: "deg", fractionDigits: 1)
-                    DebugRow(title: "Cursor ground", value: model.groundCursorCoordinate.altitudeMeters, suffix: "m", fractionDigits: 1)
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Reference overlay")
-                        .font(.headline)
-
-                    Toggle("Compass spokes", isOn: $model.showCompassOverlay)
-                    Toggle("Distance rings", isOn: $model.showDistanceOverlay)
-                    Toggle("Aircraft projection", isOn: $model.showProjectionShadow)
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Geo target tuning")
-                            .font(.headline)
-                        Spacer()
-                        Button {
-                            model.resetTargetTuning()
-                        } label: {
-                            Label("Reset", systemImage: "arrow.counterclockwise")
-                        }
-                        .buttonStyle(.borderless)
-                    }
-
-                    TuningWheel(title: "East", value: $model.targetEastOffsetMeters, range: -500 ... 500, step: 0.1)
-                    TuningWheel(title: "North", value: $model.targetNorthOffsetMeters, range: -500 ... 500, step: 0.1)
-                    TuningWheel(title: "Altitude", value: $model.targetAltitudeOffsetMeters, range: -500 ... 500, step: 0.1)
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Local aircraft tuning")
-                        .font(.headline)
-
-                    TuningWheel(title: "Left / Right", value: $model.localRightOffsetMeters, range: -500 ... 500, step: 0.1)
-                    TuningWheel(title: "Back / Forward", value: $model.localForwardOffsetMeters, range: -500 ... 500, step: 0.1)
-                    AngleWheel(title: "Yaw offset", value: $model.aircraftYawOffsetDegrees, range: -180 ... 180, step: 0.1)
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Aircraft size")
-                            .font(.headline)
-                        Spacer()
-                        Button {
-                            model.useDemoMarkerSize()
-                        } label: {
-                            Label("Marker", systemImage: "smallcircle.filled.circle")
-                        }
-                        .buttonStyle(.borderless)
-
-                        Button {
-                            model.useRealA350Size()
-                        } label: {
-                            Label("Real", systemImage: "airplane")
-                        }
-                        .buttonStyle(.borderless)
-                    }
-
-                    TuningWheel(title: "Length", value: $model.aircraftLengthMeters, range: 2 ... 80, step: 0.1)
-                    DebugRow(title: "A350-900 reference", value: AppModel.a350900LengthMeters, suffix: "m", fractionDigits: 1)
-                }
-
             }
         }
         .padding(20)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var mainTab: some View {
+        CompassCalibrationView(model: model)
+
+        Divider()
+
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Location")
+                .font(.headline)
+
+            Picker("Preset", selection: locationPresetBinding) {
+                ForEach(LocationPresetOption.allCases) { option in
+                    Text(option.title).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if model.locationPresetOption == .gps {
+                gpsStatusRow
+            }
+
+            if let error = model.lastLocationError {
+                Text(error)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.red)
+            }
+
+            CoordinateField(title: "Observer alt", value: $model.observerAltitude, fractionDigits: 1)
+        }
+
+        Divider()
+
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Flight source")
+                .font(.headline)
+
+            Picker("Source", selection: $model.flightDataSource) {
+                ForEach(FlightDataSource.allCases) { source in
+                    Text(source.title).tag(source)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            DebugRow(title: "Aircraft", value: Double(model.aircraft.count), suffix: "", fractionDigits: 0)
+            if let age = model.flightSnapshotAgeSeconds {
+                DebugRow(title: "Snapshot age", value: age, suffix: "s", fractionDigits: 1)
+            }
+            if let error = model.lastFlightError {
+                Text(error)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var worldTab: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Eye height")
+                .font(.headline)
+            CoordinateField(title: "Eye height", value: $model.observerHeightAboveGroundMeters, fractionDigits: 1)
+            DebugRow(title: "Manual ground", value: model.observerGroundElevationMeters, suffix: "m", fractionDigits: 1)
+        }
+
+        Divider()
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Ground cursor")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    model.resetGroundCursor()
+                } label: {
+                    Label("Reset", systemImage: "arrow.counterclockwise")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            Toggle("Show cursor", isOn: $model.showGroundCursor)
+            TuningWheel(title: "Left / Right", value: $model.groundCursorRightOffsetMeters, range: -500 ... 500, step: 0.1)
+            TuningWheel(title: "Back / Forward", value: $model.groundCursorForwardOffsetMeters, range: -500 ... 500, step: 0.1)
+            DebugRow(title: "Cursor distance", value: model.groundCursorDistanceMeters, suffix: "m", fractionDigits: 1)
+            DebugRow(title: "Cursor bearing", value: model.groundCursorWorldBearingDegrees, suffix: "deg", fractionDigits: 1)
+            DebugRow(title: "Cursor ground", value: model.groundCursorCoordinate.altitudeMeters, suffix: "m", fractionDigits: 1)
+        }
+
+        Divider()
+
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Reference overlay")
+                .font(.headline)
+
+            Toggle("Compass spokes", isOn: $model.showCompassOverlay)
+            Toggle("Distance rings", isOn: $model.showDistanceOverlay)
+            Toggle("Aircraft projection", isOn: $model.showProjectionShadow)
+        }
+    }
+
+    @ViewBuilder
+    private var tuningTab: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            DebugRow(title: "Primary lat", value: model.targetCoordinate.latitudeDegrees, suffix: "deg", fractionDigits: 6)
+            DebugRow(title: "Primary lon", value: model.targetCoordinate.longitudeDegrees, suffix: "deg", fractionDigits: 6)
+            DebugRow(title: "Primary alt", value: model.targetCoordinate.altitudeMeters, suffix: "m", fractionDigits: 1)
+            DebugRow(title: "Observer ground", value: model.observerGroundElevationMeters, suffix: "m", fractionDigits: 1)
+            DebugRow(title: "Observer eye alt", value: model.observerAltitude, suffix: "m", fractionDigits: 1)
+            DebugRow(title: "Primary ground", value: model.targetGroundElevationMeters, suffix: "m", fractionDigits: 1)
+            DebugRow(title: "Aircraft ground", value: model.aircraftGroundElevationMeters, suffix: "m", fractionDigits: 1)
+            DebugRow(title: "Horizontal", value: model.placement.horizontalDistanceMeters, suffix: "m", fractionDigits: 1)
+            DebugRow(title: "Distance", value: model.placement.slantDistanceMeters, suffix: "m", fractionDigits: 1)
+            DebugRow(title: "Bearing", value: model.placement.bearingDegrees, suffix: "deg", fractionDigits: 1)
+            DebugRow(title: "Elevation", value: model.placement.elevationDegrees, suffix: "deg", fractionDigits: 1)
+            DebugRow(title: "Relative bearing", value: model.relativeBearingDegrees, suffix: "deg", fractionDigits: 1)
+            DebugRow(title: "Aircraft yaw", value: model.aircraftRealityYawDegrees, suffix: "deg", fractionDigits: 1)
+            DebugRow(title: "Tuned distance", value: model.tunedDistanceMeters, suffix: "m", fractionDigits: 1)
+            DebugRow(title: "Aircraft length", value: model.aircraftLengthMeters, suffix: "m", fractionDigits: 1)
+            DebugRow(title: "Visual length", value: model.estimatedAircraftAngularLengthDegrees, suffix: "deg", fractionDigits: 1)
+        }
+
+        Divider()
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Geo target tuning")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    model.resetTargetTuning()
+                } label: {
+                    Label("Reset", systemImage: "arrow.counterclockwise")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            TuningWheel(title: "East", value: $model.targetEastOffsetMeters, range: -500 ... 500, step: 0.1)
+            TuningWheel(title: "North", value: $model.targetNorthOffsetMeters, range: -500 ... 500, step: 0.1)
+            TuningWheel(title: "Altitude", value: $model.targetAltitudeOffsetMeters, range: -500 ... 500, step: 0.1)
+        }
+
+        Divider()
+
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Local aircraft tuning")
+                .font(.headline)
+
+            TuningWheel(title: "Left / Right", value: $model.localRightOffsetMeters, range: -500 ... 500, step: 0.1)
+            TuningWheel(title: "Back / Forward", value: $model.localForwardOffsetMeters, range: -500 ... 500, step: 0.1)
+            AngleWheel(title: "Yaw offset", value: $model.aircraftYawOffsetDegrees, range: -180 ... 180, step: 0.1)
+        }
+
+        Divider()
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Aircraft size")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    model.useDemoMarkerSize()
+                } label: {
+                    Label("Marker", systemImage: "smallcircle.filled.circle")
+                }
+                .buttonStyle(.borderless)
+
+                Button {
+                    model.useRealA350Size()
+                } label: {
+                    Label("Real", systemImage: "airplane")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            TuningWheel(title: "Length", value: $model.aircraftLengthMeters, range: 2 ... 80, step: 0.1)
+            DebugRow(title: "A350-900 reference", value: AppModel.a350900LengthMeters, suffix: "m", fractionDigits: 1)
+        }
     }
 
     private var locationPresetBinding: Binding<LocationPresetOption> {
@@ -566,11 +647,8 @@ private struct CompassCalibrationView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
 
-            CompassDial(
-                yawOffsetDegrees: model.yawOffsetDegrees,
-                targetBearingDegrees: model.placement.bearingDegrees
-            )
-            .frame(height: 180)
+            CompassDial(model: model)
+                .frame(height: 180)
 
             VStack(alignment: .leading, spacing: 8) {
                 DebugRow(title: "Forward bearing", value: model.yawOffsetDegrees, suffix: "deg", fractionDigits: 0)
@@ -629,8 +707,7 @@ private struct CompassCalibrationView: View {
 }
 
 private struct CompassDial: View {
-    let yawOffsetDegrees: Double
-    let targetBearingDegrees: Double
+    @ObservedObject var model: AppModel
 
     private let cardinalBearings: [(label: String, bearing: Double)] = [
         ("N", 0),
@@ -638,6 +715,10 @@ private struct CompassDial: View {
         ("S", 180),
         ("W", 270)
     ]
+
+    /// Distance shown at the rim of the dial. Anything farther saturates
+    /// at the edge.
+    private static let maxRangeKm: Double = 50
 
     var body: some View {
         GeometryReader { proxy in
@@ -662,18 +743,25 @@ private struct CompassDial: View {
                     .position(x: center.x, y: center.y - radius - 12)
 
                 ForEach(cardinalBearings, id: \.label) { item in
-                    let position = point(for: item.bearing, radius: radius, center: center)
+                    let position = point(
+                        forBearing: item.bearing,
+                        radiusFraction: 1.0,
+                        radius: radius,
+                        center: center
+                    )
                     Text(item.label)
                         .font(.headline.monospacedDigit())
                         .foregroundStyle(item.label == "N" ? .red : .primary)
                         .position(position)
                 }
 
-                let targetPosition = point(for: targetBearingDegrees, radius: radius * 0.78, center: center)
-                Image(systemName: "airplane")
-                    .foregroundStyle(.yellow)
-                    .font(.title3)
-                    .position(targetPosition)
+                ForEach(model.aircraft) { aircraft in
+                    aircraftDot(
+                        for: aircraft,
+                        radius: radius,
+                        center: center
+                    )
+                }
 
                 Circle()
                     .fill(.primary)
@@ -683,12 +771,65 @@ private struct CompassDial: View {
         }
     }
 
-    private func point(for bearingDegrees: Double, radius: CGFloat, center: CGPoint) -> CGPoint {
-        let relative = GeoMath.degreesToRadians(GeoMath.normalizedDegrees(bearingDegrees - yawOffsetDegrees))
-        return CGPoint(
-            x: center.x + sin(relative) * radius,
-            y: center.y - cos(relative) * radius
+    @ViewBuilder
+    private func aircraftDot(for aircraft: Aircraft, radius: CGFloat, center: CGPoint) -> some View {
+        let placement = model.placement(for: aircraft)
+        let radiusFraction = logScaledRadius(distanceMeters: placement.horizontalDistanceMeters)
+        let position = point(
+            forBearing: placement.bearingDegrees,
+            radiusFraction: radiusFraction,
+            radius: radius,
+            center: center
         )
+        let isSelected = aircraft.id == model.selectedAircraftID
+
+        Group {
+            if isSelected {
+                Image(systemName: "airplane")
+                    .font(.title3)
+                    .foregroundStyle(.yellow)
+            } else {
+                Circle()
+                    .fill(.secondary)
+                    .frame(width: 6, height: 6)
+            }
+        }
+        // Inflate the hit-test area to ~24 pt so dots near the rim of the
+        // dial are still tappable. The visible dot stays small.
+        .frame(width: 24, height: 24)
+        .contentShape(Rectangle())
+        .position(position)
+        .onTapGesture {
+            model.selectAircraft(id: aircraft.id)
+        }
+    }
+
+    private func point(
+        forBearing bearingDegrees: Double,
+        radiusFraction: CGFloat,
+        radius: CGFloat,
+        center: CGPoint
+    ) -> CGPoint {
+        let relative = GeoMath.degreesToRadians(
+            GeoMath.normalizedDegrees(bearingDegrees - model.yawOffsetDegrees)
+        )
+        let r = radius * radiusFraction
+        return CGPoint(
+            x: center.x + sin(relative) * r,
+            y: center.y - cos(relative) * r
+        )
+    }
+
+    /// Maps a horizontal distance in meters to a `[0, 1]` radial fraction
+    /// using `log(1 + km) / log(1 + maxRangeKm)`. Spreads close-in
+    /// aircraft (sub-10 km) across most of the dial; far-out aircraft
+    /// pile near the rim instead of squishing into the center.
+    private func logScaledRadius(distanceMeters: Double) -> CGFloat {
+        let distanceKm = max(0, distanceMeters / 1000.0)
+        let numerator = log(1.0 + distanceKm)
+        let denominator = log(1.0 + Self.maxRangeKm)
+        let fraction = numerator / denominator
+        return CGFloat(min(max(fraction, 0), 1))
     }
 }
 
