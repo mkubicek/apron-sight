@@ -9,39 +9,41 @@ struct ContentView: View {
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
 
     @State private var immersiveSpaceIsOpen = false
-    @State private var statusMessage = "Immersive demo space closed"
+    @State private var immersiveSpaceError: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 24) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 16) {
                     Text("apron-sight")
                         .font(.largeTitle.weight(.semibold))
 
-                    Text(model.primaryAircraft.callsign)
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-
-                    Button {
-                        Task {
-                            await toggleImmersiveSpace()
+                    HStack(spacing: 10) {
+                        Button {
+                            Task { await toggleImmersiveSpace() }
+                        } label: {
+                            Label(
+                                immersiveSpaceIsOpen ? "Close" : "Open",
+                                systemImage: immersiveSpaceIsOpen ? "xmark.circle" : "viewfinder.circle"
+                            )
+                            .frame(maxWidth: .infinity)
                         }
-                    } label: {
-                        Label(
-                            immersiveSpaceIsOpen ? "Close Demo Space" : "Open Demo Space",
-                            systemImage: immersiveSpaceIsOpen ? "xmark.circle" : "viewfinder.circle"
-                        )
+                        .buttonStyle(.borderedProminent)
+
+                        Button {
+                            model.refreshFlights()
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.counterclockwise.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
                     }
 
-                    Button {
-                        model.refreshFlights()
-                    } label: {
-                        Label("Refresh Flights", systemImage: "arrow.counterclockwise.circle")
+                    if let error = immersiveSpaceError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
-
-                    Text(statusMessage)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
 
                     SelectedFlightPanel(model: model)
                 }
@@ -67,7 +69,7 @@ struct ContentView: View {
         if immersiveSpaceIsOpen {
             await dismissImmersiveSpace()
             immersiveSpaceIsOpen = false
-            statusMessage = "Immersive demo space closed"
+            immersiveSpaceError = nil
         } else {
             await openImmersiveSpaceIfNeeded()
         }
@@ -82,13 +84,13 @@ struct ContentView: View {
         switch result {
         case .opened:
             immersiveSpaceIsOpen = true
-            statusMessage = "Immersive demo space open"
+            immersiveSpaceError = nil
         case .userCancelled:
-            statusMessage = "Immersive demo space cancelled"
+            immersiveSpaceError = "Immersive space dismissed."
         case .error:
-            statusMessage = "Unable to open immersive demo space"
+            immersiveSpaceError = "Unable to open immersive space."
         @unknown default:
-            statusMessage = "Unknown immersive space result"
+            immersiveSpaceError = "Unknown immersive space error."
         }
     }
 }
