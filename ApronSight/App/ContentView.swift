@@ -123,7 +123,7 @@ private struct SelectedFlightPanel: View {
                     .font(.title3.weight(.semibold))
                     .lineLimit(1)
 
-                FlightRouteView(callsign: status.aircraft.callsign)
+                FlightRouteView(callsign: status.aircraft.callsign, icao24: status.aircraft.id)
 
                 VStack(alignment: .leading, spacing: 7) {
                     DebugRow(title: "Distance", value: status.relativeDistanceMeters, suffix: "m", fractionDigits: 0)
@@ -245,32 +245,38 @@ private struct AircraftPhotoView: View {
     }
 }
 
-/// Shows the origin and destination airport for the selected flight,
-/// looked up from adsbdb.com by callsign. Renders nothing while the
-/// lookup is in flight or if no route was found — the field is
-/// best-effort and many callsigns (GA, military, unscheduled) won't
-/// resolve.
+/// Shows the origin and destination airport for the selected flight.
+/// adsbdb resolves the *current scheduled* route by callsign for most
+/// numeric airline callsigns; OpenSky's flight history covers
+/// suffix-letter callsigns that adsbdb misses by returning the
+/// aircraft's previous completed flight (labelled "Last flight"). When
+/// neither resolves, the row simply doesn't render.
 private struct FlightRouteView: View {
     let callsign: String
+    let icao24: String
 
     @State private var route: FlightRoute?
 
     var body: some View {
         Group {
-            if let summary = route.flatMap(formatRoute) {
+            if let route, let summary = formatRoute(route) {
                 HStack(spacing: 6) {
-                    Image(systemName: "airplane.departure")
-                    Text(summary)
+                    Image(systemName: route.kind == .scheduled ? "airplane.departure" : "clock.arrow.circlepath")
+                    Text(label(for: route, summary: summary))
                 }
                 .font(.callout.monospacedDigit())
                 .foregroundStyle(.secondary)
             }
         }
-        .task(id: callsign) {
+        .task(id: "\(callsign)|\(icao24)") {
             route = nil
-            let trimmed = callsign.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            route = await FlightRouteLookup.shared.route(forCallsign: trimmed)
+            let trimmedCallsign = callsign.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedICAO = icao24.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedCallsign.isEmpty || !trimmedICAO.isEmpty else { return }
+            route = await FlightRouteLookup.shared.route(
+                forCallsign: trimmedCallsign,
+                icao24: trimmedICAO.isEmpty ? nil : trimmedICAO
+            )
         }
     }
 
@@ -279,6 +285,15 @@ private struct FlightRouteView: View {
         let destination = route.destination?.icao ?? route.destination?.iata
         guard origin != nil || destination != nil else { return nil }
         return "\(origin ?? "—") → \(destination ?? "—")"
+    }
+
+    private func label(for route: FlightRoute, summary: String) -> String {
+        switch route.kind {
+        case .scheduled:
+            return summary
+        case .previous:
+            return "Last: \(summary)"
+        }
     }
 }
 

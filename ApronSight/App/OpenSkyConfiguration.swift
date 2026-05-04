@@ -7,6 +7,14 @@ enum OpenSkyConfiguration {
     }
 
     static func makeLiveFlightProvider() -> any FlightProvider {
+        makeOpenSkyClient()
+    }
+
+    /// Returns the same `OpenSkyClient` shape used for the live feed,
+    /// suitable for handing to other consumers (route history, etc.).
+    /// Each consumer gets its own instance — they share credentials
+    /// but maintain independent OAuth token caches, which is fine.
+    static func makeOpenSkyClient() -> OpenSkyClient {
         guard let credentials else {
             return OpenSkyClient.anonymous()
         }

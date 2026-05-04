@@ -1,4 +1,5 @@
 import CoreLocation
+import FlightFeed
 import Foundation
 import simd
 import SwiftUI
@@ -226,6 +227,14 @@ final class AppModel: ObservableObject {
         // Start GPS updates if the initial preset is `.gps`. Permission
         // prompt fires here on first run.
         updateGPSStatus()
+
+        // Hand the route lookup an authenticated OpenSky client so it
+        // can fall back to /flights/aircraft history when adsbdb has
+        // no entry for a transmitted callsign.
+        let routeClient = OpenSkyConfiguration.makeOpenSkyClient()
+        Task {
+            await FlightRouteLookup.shared.setOpenSkyClient(routeClient)
+        }
     }
 
     var observer: GeoCoordinate {

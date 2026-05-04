@@ -25,6 +25,9 @@ public final class OpenSkyClient: FlightProvider, @unchecked Sendable {
     }
 
     public static let defaultStatesURL = URL(string: "https://opensky-network.org/api/states/all")!
+    public static let defaultFlightsByAircraftURL = URL(
+        string: "https://opensky-network.org/api/flights/aircraft"
+    )!
     public static let defaultTokenURL = URL(
         string: "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
     )!
@@ -32,6 +35,7 @@ public final class OpenSkyClient: FlightProvider, @unchecked Sendable {
     private let credentials: Credentials
     private let session: URLSession
     private let statesURL: URL
+    private let flightsByAircraftURL: URL
     private let tokenURL: URL
     private let tokenStore = TokenStore()
 
@@ -39,11 +43,13 @@ public final class OpenSkyClient: FlightProvider, @unchecked Sendable {
         credentials: Credentials = .anonymous,
         session: URLSession = .shared,
         statesURL: URL = OpenSkyClient.defaultStatesURL,
+        flightsByAircraftURL: URL = OpenSkyClient.defaultFlightsByAircraftURL,
         tokenURL: URL = OpenSkyClient.defaultTokenURL
     ) {
         self.credentials = credentials
         self.session = session
         self.statesURL = statesURL
+        self.flightsByAircraftURL = flightsByAircraftURL
         self.tokenURL = tokenURL
     }
 
@@ -106,6 +112,70 @@ public final class OpenSkyClient: FlightProvider, @unchecked Sendable {
             region.contains(latitude: $0.latitudeDegrees, longitude: $0.longitudeDegrees)
         }
         return FlightSnapshot(flights: filtered, capturedAt: parsed.capturedAt, region: region)
+    }
+
+    /// Returns up to a window of completed flights for a single aircraft,
+    /// most-recent first. OpenSky rejects windows wider than ~30 days; we
+    /// default to 7 to keep the response small. The endpoint only returns
+    /// flights that have already landed, so for an in-flight aircraft you
+    /// get the *previous* leg, not the current one.
+    public func flightHistory(
+        forICAO24 icao24: String,
+        lookbackDays: Int = 7,
+        now: Date = Date()
+    ) async throws -> [OpenSkyFlight] {
+        let lower = icao24.lowercased()
+        let end = Int(now.timeIntervalSince1970)
+        let begin = end - max(lookbackDays, 1) * 86_400
+
+        var components = URLComponents(url: flightsByAircraftURL, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "icao24", value: lower),
+            URLQueryItem(name: "begin", value: String(begin)),
+            URLQueryItem(name: "end", value: String(end))
+        ]
+        guard let url = components.url else {
+            throw FlightFeedError.transport(URLError(.badURL))
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuth(to: &request)
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw FlightFeedError.transport(error)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw FlightFeedError.transport(URLError(.badServerResponse))
+        }
+
+        switch http.statusCode {
+        case 200:
+            break
+        // OpenSky returns 404 when the aircraft has no flights in the window.
+        case 404:
+            return []
+        case 401, 403:
+            throw FlightFeedError.authentication("status \(http.statusCode)")
+        case 429:
+            throw FlightFeedError.rateLimited(retryAfter: retryAfterSeconds(from: http))
+        default:
+            let body = String(data: data, encoding: .utf8)
+            throw FlightFeedError.http(status: http.statusCode, body: body)
+        }
+
+        do {
+            let decoded = try JSONDecoder().decode([OpenSkyFlightDTO].self, from: data)
+            return decoded
+                .map { $0.toFlight() }
+                .sorted { $0.lastSeen > $1.lastSeen }
+        } catch {
+            throw FlightFeedError.decoding("flights/aircraft response: \(error)")
+        }
     }
 
     private func retryAfterSeconds(from response: HTTPURLResponse) -> TimeInterval? {
@@ -183,6 +253,55 @@ public final class OpenSkyClient: FlightProvider, @unchecked Sendable {
 
     private func percentEncode(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
+    }
+}
+
+/// A single completed flight returned by OpenSky's `/flights/aircraft`
+/// endpoint. Departure and arrival airports are 4-letter ICAO codes
+/// estimated from the track — either side can be `nil` when the
+/// estimate failed.
+public struct OpenSkyFlight: Equatable, Sendable {
+    public let icao24: String
+    public let firstSeen: Date
+    public let lastSeen: Date
+    public let estDepartureAirport: String?
+    public let estArrivalAirport: String?
+    public let callsign: String?
+
+    public init(
+        icao24: String,
+        firstSeen: Date,
+        lastSeen: Date,
+        estDepartureAirport: String?,
+        estArrivalAirport: String?,
+        callsign: String?
+    ) {
+        self.icao24 = icao24
+        self.firstSeen = firstSeen
+        self.lastSeen = lastSeen
+        self.estDepartureAirport = estDepartureAirport
+        self.estArrivalAirport = estArrivalAirport
+        self.callsign = callsign
+    }
+}
+
+private struct OpenSkyFlightDTO: Decodable {
+    let icao24: String
+    let firstSeen: Int
+    let lastSeen: Int
+    let estDepartureAirport: String?
+    let estArrivalAirport: String?
+    let callsign: String?
+
+    func toFlight() -> OpenSkyFlight {
+        OpenSkyFlight(
+            icao24: icao24,
+            firstSeen: Date(timeIntervalSince1970: TimeInterval(firstSeen)),
+            lastSeen: Date(timeIntervalSince1970: TimeInterval(lastSeen)),
+            estDepartureAirport: estDepartureAirport,
+            estArrivalAirport: estArrivalAirport,
+            callsign: callsign?.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
     }
 }
 
