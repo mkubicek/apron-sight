@@ -999,7 +999,8 @@ private struct PrecisionWheelControl: View {
 
             NudgeControls(
                 value: adjustedBinding,
-                amounts: nudgeAmounts
+                amounts: nudgeAmounts,
+                fractionDigits: fractionDigits
             )
         }
     }
@@ -1109,6 +1110,7 @@ private struct WheelTick: View {
 private struct NudgeControls: View {
     @Binding var value: Double
     let amounts: [Double]
+    let fractionDigits: Int
 
     var body: some View {
         HStack(spacing: 6) {
@@ -1127,7 +1129,8 @@ private struct NudgeControls: View {
     }
 
     private func label(for amount: Double) -> String {
-        let format = abs(amount) < 1 ? "%+.1f" : "%+.0f"
+        let digits = abs(amount) < 1 ? max(fractionDigits, 1) : 0
+        let format = "%+.\(digits)f"
         return String(format: format, amount)
     }
 }

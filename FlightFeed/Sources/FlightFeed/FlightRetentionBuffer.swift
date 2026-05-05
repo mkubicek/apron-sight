@@ -35,7 +35,17 @@ public struct FlightRetentionBuffer: Sendable {
         }
     }
 
-    private var entriesByID: [String: Entry] = [:]
+    public struct Track: Equatable, Sendable {
+        public let id: String
+        public let entries: [Entry]
+
+        public init(id: String, entries: [Entry]) {
+            self.id = id
+            self.entries = entries
+        }
+    }
+
+    private var historiesByID: [String: [Entry]] = [:]
     public private(set) var latestCapturedAt: Date?
 
     public init(retentionSeconds: TimeInterval) {
@@ -43,29 +53,40 @@ public struct FlightRetentionBuffer: Sendable {
         self.retentionSeconds = retentionSeconds
     }
 
-    public var count: Int { entriesByID.count }
+    public var count: Int { historiesByID.count }
 
-    public var entries: [Entry] { Array(entriesByID.values) }
+    public var entries: [Entry] {
+        historiesByID.values.compactMap { Self.normalizedHistory($0).last }
+    }
 
     public mutating func clear() {
-        entriesByID.removeAll(keepingCapacity: true)
+        historiesByID.removeAll(keepingCapacity: true)
         latestCapturedAt = nil
     }
 
     /// Merges a snapshot into the buffer and evicts entries older than
-    /// `retentionSeconds` measured against the snapshot's `capturedAt`.
+    /// `retentionSeconds` measured against the latest snapshot watermark.
+    /// OpenSky can deliver response timestamps out of order, so recency is
+    /// enforced per aircraft: a late response may fill a gap for an aircraft
+    /// that has no newer row yet, but it cannot rewind an existing entry.
     public mutating func ingest(_ snapshot: FlightSnapshot) {
         for flight in snapshot.flights {
-            let merged = Self.merge(existing: entriesByID[flight.id]?.flight, with: flight)
-            entriesByID[flight.id] = Entry(
-                flight: merged,
-                capturedAt: Self.effectiveCapturedAt(for: merged, snapshotCapturedAt: snapshot.capturedAt)
-            )
+            let capturedAt = Self.effectiveCapturedAt(for: flight, snapshotCapturedAt: snapshot.capturedAt)
+            var history = historiesByID[flight.id] ?? []
+            if let duplicateIndex = history.firstIndex(where: { $0.capturedAt == capturedAt }) {
+                history[duplicateIndex] = Entry(
+                    flight: Self.merge(existing: history[duplicateIndex].flight, with: flight),
+                    capturedAt: capturedAt
+                )
+            } else {
+                history.append(Entry(flight: flight, capturedAt: capturedAt))
+                history.sort { $0.capturedAt < $1.capturedAt }
+            }
+            historiesByID[flight.id] = history
         }
-        latestCapturedAt = snapshot.capturedAt
+        latestCapturedAt = max(latestCapturedAt ?? snapshot.capturedAt, snapshot.capturedAt)
 
-        let cutoff = snapshot.capturedAt.addingTimeInterval(-retentionSeconds)
-        entriesByID = entriesByID.filter { _, entry in entry.capturedAt > cutoff }
+        pruneHistories(referenceDate: latestCapturedAt ?? snapshot.capturedAt)
     }
 
     /// Returns the entries whose last-seen timestamp is within the
@@ -73,8 +94,23 @@ public struct FlightRetentionBuffer: Sendable {
     /// even though `ingest` already evicts at ingest time, so a stretch
     /// without snapshots can't keep ancient entries visible.
     public func entries(at date: Date) -> [Entry] {
+        tracks(at: date).compactMap { $0.entries.last }
+    }
+
+    /// Returns per-aircraft sample histories sorted by observation time.
+    /// Entries are field-normalized in chronological order so late-arriving
+    /// samples can still improve interpolation without making latest-state
+    /// consumers move backwards.
+    public func tracks(at date: Date) -> [Track] {
         let cutoff = date.addingTimeInterval(-retentionSeconds)
-        return entriesByID.values.filter { $0.capturedAt > cutoff }
+        return historiesByID.compactMap { id, history in
+            let normalized = Self.normalizedHistory(history)
+                .filter { $0.capturedAt > cutoff }
+            guard !normalized.isEmpty else {
+                return nil
+            }
+            return Track(id: id, entries: normalized)
+        }
     }
 
     /// Field-level merge: hard fields come from `new`, soft fields fall
@@ -113,5 +149,20 @@ public struct FlightRetentionBuffer: Sendable {
     private static func effectiveCapturedAt(for flight: LiveFlight, snapshotCapturedAt: Date) -> Date {
         let sourceTimestamp = max(flight.positionTimestamp, flight.lastContact)
         return min(sourceTimestamp, snapshotCapturedAt)
+    }
+
+    private mutating func pruneHistories(referenceDate: Date) {
+        let cutoff = referenceDate.addingTimeInterval(-retentionSeconds)
+        historiesByID = historiesByID.compactMapValues { history in
+            let retained = history.filter { $0.capturedAt > cutoff }
+            return retained.isEmpty ? nil : retained
+        }
+    }
+
+    private static func normalizedHistory(_ history: [Entry]) -> [Entry] {
+        history.reduce(into: []) { normalized, entry in
+            let merged = merge(existing: normalized.last?.flight, with: entry.flight)
+            normalized.append(Entry(flight: merged, capturedAt: entry.capturedAt))
+        }
     }
 }

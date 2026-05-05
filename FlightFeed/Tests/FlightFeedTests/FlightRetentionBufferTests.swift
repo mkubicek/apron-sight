@@ -335,6 +335,101 @@ final class FlightRetentionBufferTests: XCTestCase {
         XCTAssertEqual(buffer.count, 0)
     }
 
+    func testOutOfOrderSnapshotDoesNotMoveExistingAircraftBackward() {
+        var buffer = FlightRetentionBuffer(retentionSeconds: 90)
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        let t1 = t0.addingTimeInterval(10)
+
+        buffer.ingest(makeSnapshot(
+            flights: [makeFlight(id: "abc123", altitude: 5000, lat: 47.5, lon: 8.5)],
+            at: t1
+        ))
+        buffer.ingest(makeSnapshot(
+            flights: [makeFlight(id: "abc123", altitude: 4800, lat: 47.0, lon: 8.0)],
+            at: t0
+        ))
+
+        let entry = buffer.entries.first { $0.flight.id == "abc123" }
+        XCTAssertEqual(buffer.latestCapturedAt, t1)
+        XCTAssertEqual(entry?.capturedAt, t1)
+        XCTAssertEqual(entry?.flight.latitudeDegrees, 47.5)
+        XCTAssertEqual(entry?.flight.longitudeDegrees, 8.5)
+        XCTAssertEqual(entry?.flight.altitudeMeters, 5000)
+    }
+
+    func testOutOfOrderSnapshotCanRefreshAircraftWithoutNewerRow() {
+        var buffer = FlightRetentionBuffer(retentionSeconds: 90)
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        let t1 = t0.addingTimeInterval(10)
+        let t2 = t0.addingTimeInterval(20)
+
+        buffer.ingest(makeSnapshot(
+            flights: [
+                makeFlight(id: "abc123", altitude: 5000),
+                makeFlight(id: "def456", altitude: 6000, lat: 47.0, lon: 8.0)
+            ],
+            at: t0
+        ))
+        buffer.ingest(makeSnapshot(
+            flights: [makeFlight(id: "abc123", altitude: 5100)],
+            at: t2
+        ))
+        buffer.ingest(makeSnapshot(
+            flights: [makeFlight(id: "def456", altitude: 6100, lat: 47.2, lon: 8.2)],
+            at: t1
+        ))
+
+        let entry = buffer.entries.first { $0.flight.id == "def456" }
+        XCTAssertEqual(buffer.latestCapturedAt, t2)
+        XCTAssertEqual(entry?.capturedAt, t1)
+        XCTAssertEqual(entry?.flight.latitudeDegrees, 47.2)
+        XCTAssertEqual(entry?.flight.longitudeDegrees, 8.2)
+        XCTAssertEqual(entry?.flight.altitudeMeters, 6100)
+    }
+
+    func testOutOfOrderSnapshotsRemainAvailableAsHistory() {
+        var buffer = FlightRetentionBuffer(retentionSeconds: 90)
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        let t1 = t0.addingTimeInterval(10)
+        let t2 = t0.addingTimeInterval(20)
+
+        buffer.ingest(makeSnapshot(
+            flights: [makeFlight(id: "abc123", altitude: 5200, lat: 47.2, lon: 8.2)],
+            at: t2
+        ))
+        buffer.ingest(makeSnapshot(
+            flights: [makeFlight(id: "abc123", altitude: 5100, lat: 47.1, lon: 8.1)],
+            at: t1
+        ))
+
+        let track = buffer.tracks(at: t2).first { $0.id == "abc123" }
+        XCTAssertEqual(track?.entries.map(\.capturedAt), [t1, t2])
+        XCTAssertEqual(buffer.entries.first { $0.flight.id == "abc123" }?.capturedAt, t2)
+    }
+
+    func testLateHistoryRenormalizesLaterSoftFields() {
+        var buffer = FlightRetentionBuffer(retentionSeconds: 90)
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        let t1 = t0.addingTimeInterval(10)
+        let t2 = t0.addingTimeInterval(20)
+
+        buffer.ingest(makeSnapshot(
+            flights: [makeFlight(id: "abc123", altitude: 5000)],
+            at: t0
+        ))
+        buffer.ingest(makeSnapshot(
+            flights: [makeFlight(id: "abc123", altitude: nil)],
+            at: t2
+        ))
+        buffer.ingest(makeSnapshot(
+            flights: [makeFlight(id: "abc123", altitude: 5500)],
+            at: t1
+        ))
+
+        let track = buffer.tracks(at: t2).first { $0.id == "abc123" }
+        XCTAssertEqual(track?.entries.map { $0.flight.altitudeMeters }, [5000, 5500, 5500])
+    }
+
     // MARK: - Helpers
 
     private func makeSnapshot(flights: [LiveFlight], at date: Date) -> FlightSnapshot {

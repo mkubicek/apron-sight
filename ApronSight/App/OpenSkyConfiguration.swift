@@ -3,7 +3,7 @@ import FlightFeed
 
 enum OpenSkyConfiguration {
     static var livePollIntervalSeconds: TimeInterval {
-        credentials == nil ? 10 : 2.5
+        credentials == nil ? 10 : 5
     }
 
     static func makeLiveFlightProvider() -> any FlightProvider {

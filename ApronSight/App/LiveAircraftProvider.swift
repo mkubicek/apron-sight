@@ -51,6 +51,9 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
         force: Bool = false
     ) {
         state.setGroundAltitudeMeters(groundAltitudeMeters)
+        state.setMotionInterpolationDelaySeconds(
+            source == .live ? Self.liveInterpolationDelaySeconds : 0
+        )
         let region = RadiusRegion(centerOf: observer, radiusKm: 50)
         let regionMovedSignificantly = region.centerMoved(
             beyondMeters: Self.regionRestartThresholdMeters,
@@ -126,20 +129,11 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
 
     func aircraft(at date: Date) -> [Aircraft] {
         let fallbackGroundAltitudeMeters = state.groundAltitudeMeters
-        return state.entries(at: date).compactMap { entry in
-            // Dead-reckoning is bounded by GeoMath.maximumDeadReckoningSeconds,
-            // so positions of aircraft silent for >30 s are frozen at
-            // their 30 s-extrapolated position rather than drifting.
-            // Use the aircraft's own position timestamp rather than the
-            // poll timestamp; OpenSky can repeat stale state vectors in a
-            // fresh response, especially for surface traffic.
-            let elapsedSeconds = GeoMath.deadReckoningElapsedSeconds(
-                capturedAt: entry.flight.positionTimestamp,
-                date: date
-            )
-            return aircraft(
-                from: entry.flight,
-                elapsedSeconds: elapsedSeconds,
+        let evaluationDate = date.addingTimeInterval(-state.motionInterpolationDelaySeconds)
+        return state.tracks(at: date).compactMap { track in
+            aircraft(
+                from: track,
+                at: evaluationDate,
                 fallbackGroundAltitudeMeters: fallbackGroundAltitudeMeters
             )
         }
@@ -169,15 +163,163 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
     /// range. Sub-threshold GPS jitter no longer wipes the retention
     /// buffer.
     static let regionRestartThresholdMeters: Double = 1_000
-    /// Surface reports are sparse and velocity/track can be stale, so avoid
-    /// taxiing aircraft drifting far between OpenSky polls.
-    static let maximumGroundDeadReckoningSeconds: TimeInterval = 5
+    /// Live OpenSky traffic is rendered slightly behind wall-clock time so
+    /// out-of-order rows can become interpolation samples instead of jumps.
+    static let liveInterpolationDelaySeconds: TimeInterval = 3
+    /// Avoid slow-motion interpolation across long OpenSky coverage gaps.
+    static let maximumInterpolationGapSeconds: TimeInterval = 20
+    /// Surface reports are sparse and velocity/track can be stale. Taxi
+    /// prediction runs at full speed briefly, then eases toward a bounded
+    /// distance instead of freezing abruptly at one timestamp.
+    static let fullSpeedGroundDeadReckoningSeconds: TimeInterval = 5
+    static let groundDeadReckoningDecaySeconds: TimeInterval = 5
+    static let maximumGroundDeadReckoningSeconds: TimeInterval = 12
     /// During landing and takeoff, stale vertical rate is the easiest way to
     /// push an aircraft through the calibrated ground plane.
     static let maximumLowAltitudeVerticalDeadReckoningSeconds: TimeInterval = 5
     /// Only apply the ground-plane altitude clamp close to the observer's
     /// calibrated ground altitude; this is a flat local approximation, not DEM.
     static let lowAltitudeGroundClampWindowMeters: Double = 150
+
+    private func aircraft(
+        from track: FlightRetentionBuffer.Track,
+        at evaluationDate: Date,
+        fallbackGroundAltitudeMeters: Double?
+    ) -> Aircraft? {
+        let samples = track.entries
+        guard !samples.isEmpty else {
+            return nil
+        }
+
+        let positionSamples = positionTimestampSamples(from: samples)
+        if let interpolated = interpolatedAircraft(
+            from: positionSamples,
+            at: evaluationDate,
+            fallbackGroundAltitudeMeters: fallbackGroundAltitudeMeters
+        ) {
+            return interpolated
+        }
+
+        let predictionEntry = positionSamples.last {
+            $0.flight.positionTimestamp <= evaluationDate
+        } ?? positionSamples.first ?? samples[0]
+        // Dead-reckoning is bounded by GeoMath.maximumDeadReckoningSeconds,
+        // so positions of aircraft silent for >30 s are frozen at their
+        // 30 s-extrapolated position rather than drifting. Use the aircraft's
+        // own position timestamp rather than the poll timestamp; OpenSky can
+        // repeat stale state vectors in a fresh response, especially for
+        // surface traffic.
+        let elapsedSeconds = GeoMath.deadReckoningElapsedSeconds(
+            capturedAt: predictionEntry.flight.positionTimestamp,
+            date: evaluationDate
+        )
+        return aircraft(
+            from: predictionEntry.flight,
+            elapsedSeconds: elapsedSeconds,
+            fallbackGroundAltitudeMeters: fallbackGroundAltitudeMeters
+        )
+    }
+
+    private func interpolatedAircraft(
+        from positionSamples: [FlightRetentionBuffer.Entry],
+        at evaluationDate: Date,
+        fallbackGroundAltitudeMeters: Double?
+    ) -> Aircraft? {
+        guard let upperIndex = positionSamples.firstIndex(where: { $0.flight.positionTimestamp > evaluationDate }),
+              upperIndex > positionSamples.startIndex else {
+            return nil
+        }
+
+        let lowerIndex = positionSamples.index(before: upperIndex)
+        let before = positionSamples[lowerIndex]
+        let after = positionSamples[upperIndex]
+        let gapSeconds = after.flight.positionTimestamp.timeIntervalSince(before.flight.positionTimestamp)
+        guard gapSeconds > 0,
+              gapSeconds <= Self.maximumInterpolationGapSeconds else {
+            return nil
+        }
+
+        let fraction = min(max(evaluationDate.timeIntervalSince(before.flight.positionTimestamp) / gapSeconds, 0), 1)
+        guard let beforeCoordinate = observedCoordinate(
+            for: before.flight,
+            fallbackGroundAltitudeMeters: fallbackGroundAltitudeMeters
+        ),
+              let afterCoordinate = observedCoordinate(
+                for: after.flight,
+                fallbackGroundAltitudeMeters: fallbackGroundAltitudeMeters
+              )
+        else {
+            return nil
+        }
+
+        let offset = GeoMath.enuCoordinate(observer: beforeCoordinate, target: afterCoordinate)
+        var coordinate = GeoMath.coordinate(
+            offsetFrom: beforeCoordinate,
+            eastMeters: offset.east * fraction,
+            northMeters: offset.north * fraction,
+            upMeters: offset.up * fraction
+        )
+        if let fallbackGroundAltitudeMeters,
+           coordinate.altitudeMeters <= fallbackGroundAltitudeMeters + Self.lowAltitudeGroundClampWindowMeters {
+            coordinate.altitudeMeters = max(coordinate.altitudeMeters, fallbackGroundAltitudeMeters)
+        }
+
+        let horizontalDistanceMeters = offset.horizontalDistanceMeters
+        let observedTrack = horizontalDistanceMeters > 2
+            ? GeoMath.placement(observer: beforeCoordinate, target: afterCoordinate).bearingDegrees
+            : nil
+        let speed = interpolatedScalar(
+            before.flight.velocityMetersPerSecond,
+            after.flight.velocityMetersPerSecond,
+            fraction: fraction
+        ) ?? (horizontalDistanceMeters / gapSeconds)
+        let isOnGround = interpolatedOnGround(
+            before: before.flight,
+            after: after.flight,
+            coordinate: coordinate,
+            fallbackGroundAltitudeMeters: fallbackGroundAltitudeMeters
+        )
+        let verticalRate = isOnGround ? 0 : offset.up / gapSeconds
+        let callsign = interpolatedCallsign(before: before.flight, after: after.flight, fraction: fraction)
+        let displayFlight = fraction < 0.5 ? before.flight : after.flight
+
+        return Aircraft(
+            id: displayFlight.id,
+            callsign: callsign,
+            originCountry: after.flight.originCountry ?? before.flight.originCountry,
+            coordinate: coordinate,
+            velocityMetersPerSecond: speed,
+            trueTrackDegrees: observedTrack
+                ?? interpolatedAngle(before.flight.trueTrackDegrees, after.flight.trueTrackDegrees, fraction: fraction),
+            verticalRateMetersPerSecond: verticalRate,
+            isOnGround: isOnGround,
+            trafficKind: Self.trafficKind(for: displayFlight)
+        )
+    }
+
+    private func positionTimestampSamples(
+        from samples: [FlightRetentionBuffer.Entry]
+    ) -> [FlightRetentionBuffer.Entry] {
+        let sorted = samples.sorted {
+            if $0.flight.positionTimestamp == $1.flight.positionTimestamp {
+                return $0.capturedAt < $1.capturedAt
+            }
+
+            return $0.flight.positionTimestamp < $1.flight.positionTimestamp
+        }
+
+        return sorted.reduce(into: []) { result, entry in
+            guard result.last?.flight.positionTimestamp == entry.flight.positionTimestamp else {
+                result.append(entry)
+                return
+            }
+
+            // Repeated OpenSky rows often advance lastContact while carrying
+            // the same position fix. Keep the freshest metadata, but do not
+            // let duplicate position timestamps create interpolation brackets.
+            result[result.index(before: result.endIndex)] = entry
+        }
+    }
 
     private func aircraft(
         from flight: LiveFlight,
@@ -200,7 +342,7 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
         let verticalRate = flight.isOnGround ? 0 : (flight.verticalRateMetersPerSecond ?? 0)
         let deadReckoningSpeed = flight.trueTrackDegrees == nil ? 0 : speed
         let horizontalElapsedSeconds = flight.isOnGround
-            ? min(elapsedSeconds, Self.maximumGroundDeadReckoningSeconds)
+            ? Self.groundDeadReckoningElapsedSeconds(elapsedSeconds)
             : elapsedSeconds
         let lowAltitude = fallbackGroundAltitudeMeters.map {
             altitudeMeters <= $0 + Self.lowAltitudeGroundClampWindowMeters
@@ -244,22 +386,109 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
         )
     }
 
-    private static let knownZRHGroundVehicleCallsigns: Set<String> = [
-        "ATL783",
-        "ATL786",
-        "ORION1",
-        "TE21",
-        "TE22",
-        "TE25",
-        "VIKTOR36",
-        "ZEBRA1",
-        "ZEBRA7",
-        "ZEBRA8"
+    private func observedCoordinate(
+        for flight: LiveFlight,
+        fallbackGroundAltitudeMeters: Double?
+    ) -> GeoCoordinate? {
+        let altitudeMeters: Double
+        if flight.isOnGround {
+            guard let fallbackGroundAltitudeMeters else {
+                return nil
+            }
+            altitudeMeters = fallbackGroundAltitudeMeters
+        } else if let reportedAltitude = flight.altitudeMeters {
+            altitudeMeters = reportedAltitude
+        } else {
+            return nil
+        }
+
+        return GeoCoordinate(
+            latitudeDegrees: flight.latitudeDegrees,
+            longitudeDegrees: flight.longitudeDegrees,
+            altitudeMeters: altitudeMeters
+        )
+    }
+
+    private static func groundDeadReckoningElapsedSeconds(_ elapsedSeconds: TimeInterval) -> TimeInterval {
+        guard elapsedSeconds > fullSpeedGroundDeadReckoningSeconds else {
+            return elapsedSeconds
+        }
+
+        let taperedSeconds = elapsedSeconds - fullSpeedGroundDeadReckoningSeconds
+        let easedSeconds = groundDeadReckoningDecaySeconds
+            * (1 - exp(-taperedSeconds / groundDeadReckoningDecaySeconds))
+        return min(
+            fullSpeedGroundDeadReckoningSeconds + easedSeconds,
+            maximumGroundDeadReckoningSeconds
+        )
+    }
+
+    private func interpolatedScalar(_ before: Double?, _ after: Double?, fraction: Double) -> Double? {
+        switch (before, after) {
+        case let (before?, after?):
+            return before + (after - before) * fraction
+        case let (before?, nil):
+            return before
+        case let (nil, after?):
+            return after
+        case (nil, nil):
+            return nil
+        }
+    }
+
+    private func interpolatedAngle(_ before: Double?, _ after: Double?, fraction: Double) -> Double? {
+        switch (before, after) {
+        case let (before?, after?):
+            let delta = (after - before + 540).truncatingRemainder(dividingBy: 360) - 180
+            return GeoMath.normalizedDegrees(before + delta * fraction)
+        case let (before?, nil):
+            return before
+        case let (nil, after?):
+            return after
+        case (nil, nil):
+            return nil
+        }
+    }
+
+    private func interpolatedOnGround(
+        before: LiveFlight,
+        after: LiveFlight,
+        coordinate: GeoCoordinate,
+        fallbackGroundAltitudeMeters: Double?
+    ) -> Bool {
+        guard before.isOnGround != after.isOnGround else {
+            return before.isOnGround
+        }
+
+        guard let fallbackGroundAltitudeMeters else {
+            return false
+        }
+
+        return coordinate.altitudeMeters <= fallbackGroundAltitudeMeters + 3
+    }
+
+    private func interpolatedCallsign(before: LiveFlight, after: LiveFlight, fraction: Double) -> String {
+        let preferred = fraction < 0.5 ? before.callsign : after.callsign
+        let fallback = fraction < 0.5 ? after.callsign : before.callsign
+        let callsign = preferred.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? fallback
+            : preferred
+        let trimmed = callsign.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? before.id.uppercased() : trimmed
+    }
+
+    private static let knownZRHGroundVehicleCallsignPrefixes = [
+        "ATL",
+        "ORION",
+        "TE",
+        "URSULA",
+        "VIKTOR",
+        "ZEBRA"
     ]
 
     private static func trafficKind(for flight: LiveFlight) -> TrafficKind {
         let callsign = flight.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if flight.isSurfaceVehicle || knownZRHGroundVehicleCallsigns.contains(callsign) {
+        if flight.isSurfaceVehicle || knownZRHGroundVehicleCallsignPrefixes.contains(where: callsign.hasPrefix) {
             return .groundVehicle
         }
 
@@ -272,6 +501,7 @@ private final class LiveAircraftProviderState: @unchecked Sendable {
     private var buffer = FlightRetentionBuffer(retentionSeconds: LiveAircraftProvider.retentionSeconds)
     private var generation = 0
     private var fallbackGroundAltitudeMeters: Double?
+    private var interpolationDelaySeconds: TimeInterval = 0
 
     var latestSnapshotCapturedAt: Date? {
         lock.lock()
@@ -285,16 +515,28 @@ private final class LiveAircraftProviderState: @unchecked Sendable {
         return fallbackGroundAltitudeMeters
     }
 
+    var motionInterpolationDelaySeconds: TimeInterval {
+        lock.lock()
+        defer { lock.unlock() }
+        return interpolationDelaySeconds
+    }
+
     func setGroundAltitudeMeters(_ meters: Double) {
         lock.lock()
         defer { lock.unlock() }
         fallbackGroundAltitudeMeters = meters
     }
 
-    func entries(at date: Date) -> [FlightRetentionBuffer.Entry] {
+    func setMotionInterpolationDelaySeconds(_ seconds: TimeInterval) {
         lock.lock()
         defer { lock.unlock() }
-        return buffer.entries(at: date)
+        interpolationDelaySeconds = max(seconds, 0)
+    }
+
+    func tracks(at date: Date) -> [FlightRetentionBuffer.Track] {
+        lock.lock()
+        defer { lock.unlock() }
+        return buffer.tracks(at: date)
     }
 
     func startNewGeneration() -> Int {
@@ -324,6 +566,7 @@ private final class LiveAircraftProviderState: @unchecked Sendable {
         guard self.generation == generation else {
             return false
         }
+
         buffer.ingest(snapshot)
         return true
     }

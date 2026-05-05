@@ -115,7 +115,9 @@ final class AppModel: ObservableObject {
     @Published var observerAltitude: Double {
         didSet { observerCoordinateDidChange() }
     }
-    @Published var observerHeightAboveGroundMeters: Double
+    @Published var observerHeightAboveGroundMeters: Double {
+        didSet { reconfigureFlightProvider() }
+    }
     @Published var yawOffsetDegrees: Double {
         didSet { persistYawIfNeeded() }
     }
@@ -288,7 +290,7 @@ final class AppModel: ObservableObject {
 
     var estimatedAircraftAngularLengthDegrees: Double {
         let distance = max(tunedDistanceMeters, 0.001)
-        return GeoMath.radiansToDegrees(2 * atan((aircraftLengthMeters / 2) / distance))
+        return GeoMath.radiansToDegrees(2 * atan((visualLengthMeters(for: primaryAircraft) / 2) / distance))
     }
 
     var relativeBearingDegrees: Double {
@@ -401,7 +403,11 @@ final class AppModel: ObservableObject {
         // spheres are resolved by the renderer's angular tap tiebreaker.
         let distance = relativeDistanceMeters(for: aircraft)
         let angularRadius = distance * tan(GeoMath.degreesToRadians(Self.selectionAngularRadiusDegrees))
-        return min(max(angularRadius, aircraftLengthMeters * 0.45, 24), Self.maximumSelectionRadiusMeters)
+        return min(max(angularRadius, visualLengthMeters(for: aircraft) * 0.45, 24), Self.maximumSelectionRadiusMeters)
+    }
+
+    func visualScale(for aircraft: Aircraft) -> SIMD3<Float> {
+        scale(forAircraftLengthMeters: visualLengthMeters(for: aircraft))
     }
 
     func markerVisualScale(for aircraft: Aircraft) -> SIMD3<Float> {
@@ -411,7 +417,7 @@ final class AppModel: ObservableObject {
         return scale(forAircraftLengthMeters: max(visualLengthMeters(for: aircraft), minimumVisibleLength))
     }
 
-    private func visualLengthMeters(for aircraft: Aircraft) -> Double {
+    func visualLengthMeters(for aircraft: Aircraft) -> Double {
         switch aircraft.trafficKind {
         case .aircraft:
             return aircraftLengthMeters
