@@ -50,6 +50,8 @@ enum OpenSkyParser {
             let geoAltitude = row.count > 13 ? row[13] as? Double : nil
             let altitude = geoAltitude ?? baroAltitude
             let verticalRate = onGround ? 0 : reportedVerticalRate
+            let category = (row.count > 17 ? row[17] as? Int : nil)
+                .flatMap(OpenSkyAircraftCategory.init(rawValue:))
 
             flights.append(
                 LiveFlight(
@@ -63,6 +65,7 @@ enum OpenSkyParser {
                     trueTrackDegrees: trueTrack,
                     verticalRateMetersPerSecond: verticalRate,
                     isOnGround: onGround,
+                    category: category,
                     positionTimestamp: timePosition ?? lastContact,
                     lastContact: lastContact
                 )

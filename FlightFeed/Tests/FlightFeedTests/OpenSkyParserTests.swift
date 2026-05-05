@@ -8,8 +8,8 @@ final class OpenSkyParserTests: XCTestCase {
         {
           "time": 1714723200,
           "states": [
-            ["abc123", "SWR214  ", "Switzerland", 1714723195, 1714723199, 8.5500, 47.4700, 950.0, false, 120.0, 90.0, 1.5, null, 970.0, "1234", false, 0],
-            ["def456", null, "Germany", null, 1714723199, 8.5800, 47.4500, null, true, null, null, null, null, null, "0000", false, 0]
+            ["abc123", "SWR214  ", "Switzerland", 1714723195, 1714723199, 8.5500, 47.4700, 950.0, false, 120.0, 90.0, 1.5, null, 970.0, "1234", false, 0, 4],
+            ["def456", null, "Germany", null, 1714723199, 8.5800, 47.4500, null, true, null, null, null, null, null, "0000", false, 0, 17]
           ]
         }
         """
@@ -28,12 +28,16 @@ final class OpenSkyParserTests: XCTestCase {
         XCTAssertEqual(first.trueTrackDegrees, 90.0)
         XCTAssertEqual(first.verticalRateMetersPerSecond, 1.5)
         XCTAssertFalse(first.isOnGround)
+        XCTAssertEqual(first.category, .large)
+        XCTAssertFalse(first.isSurfaceVehicle)
 
         let second = result.flights[1]
         XCTAssertEqual(second.callsign, "")
         XCTAssertTrue(second.isOnGround)
         XCTAssertNil(second.altitudeMeters)
         XCTAssertEqual(second.verticalRateMetersPerSecond, 0)
+        XCTAssertEqual(second.category, .surfaceServiceVehicle)
+        XCTAssertTrue(second.isSurfaceVehicle)
     }
 
     func testGroundStateZeroesReportedVerticalRate() throws {

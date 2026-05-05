@@ -22,6 +22,7 @@ public struct LiveFlight: Equatable, Identifiable, Sendable, Hashable {
     public var trueTrackDegrees: Double?
     public var verticalRateMetersPerSecond: Double?
     public var isOnGround: Bool
+    public var category: OpenSkyAircraftCategory?
     /// Wall-clock time of the position fix (UTC).
     public var positionTimestamp: Date
     /// Time the upstream last received any signal from this aircraft (UTC).
@@ -38,6 +39,7 @@ public struct LiveFlight: Equatable, Identifiable, Sendable, Hashable {
         trueTrackDegrees: Double? = nil,
         verticalRateMetersPerSecond: Double? = nil,
         isOnGround: Bool = false,
+        category: OpenSkyAircraftCategory? = nil,
         positionTimestamp: Date,
         lastContact: Date
     ) {
@@ -51,8 +53,43 @@ public struct LiveFlight: Equatable, Identifiable, Sendable, Hashable {
         self.trueTrackDegrees = trueTrackDegrees
         self.verticalRateMetersPerSecond = verticalRateMetersPerSecond
         self.isOnGround = isOnGround
+        self.category = category
         self.positionTimestamp = positionTimestamp
         self.lastContact = lastContact
+    }
+}
+
+public enum OpenSkyAircraftCategory: Int, Sendable, Hashable {
+    case noInformation = 0
+    case noEmitterCategory = 1
+    case light = 2
+    case small = 3
+    case large = 4
+    case highVortexLarge = 5
+    case heavy = 6
+    case highPerformance = 7
+    case rotorcraft = 8
+    case glider = 9
+    case lighterThanAir = 10
+    case parachutist = 11
+    case ultralight = 12
+    case reserved = 13
+    case unmannedAerialVehicle = 14
+    case spaceVehicle = 15
+    case surfaceEmergencyVehicle = 16
+    case surfaceServiceVehicle = 17
+    case pointObstacle = 18
+    case clusterObstacle = 19
+    case lineObstacle = 20
+
+    public var isSurfaceVehicle: Bool {
+        self == .surfaceEmergencyVehicle || self == .surfaceServiceVehicle
+    }
+}
+
+public extension LiveFlight {
+    var isSurfaceVehicle: Bool {
+        category?.isSurfaceVehicle == true
     }
 }
 

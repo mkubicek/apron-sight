@@ -1,5 +1,10 @@
 import Foundation
 
+public enum TrafficKind: Equatable, Sendable {
+    case aircraft
+    case groundVehicle
+}
+
 public struct Aircraft: Equatable, Identifiable, Sendable {
     public var id: String
     public var callsign: String
@@ -9,6 +14,7 @@ public struct Aircraft: Equatable, Identifiable, Sendable {
     public var trueTrackDegrees: Double?
     public var verticalRateMetersPerSecond: Double?
     public var isOnGround: Bool
+    public var trafficKind: TrafficKind
 
     public init(
         id: String,
@@ -18,7 +24,8 @@ public struct Aircraft: Equatable, Identifiable, Sendable {
         velocityMetersPerSecond: Double? = nil,
         trueTrackDegrees: Double? = nil,
         verticalRateMetersPerSecond: Double? = nil,
-        isOnGround: Bool = false
+        isOnGround: Bool = false,
+        trafficKind: TrafficKind = .aircraft
     ) {
         self.id = id
         self.callsign = callsign
@@ -28,6 +35,7 @@ public struct Aircraft: Equatable, Identifiable, Sendable {
         self.trueTrackDegrees = trueTrackDegrees
         self.verticalRateMetersPerSecond = verticalRateMetersPerSecond
         self.isOnGround = isOnGround
+        self.trafficKind = trafficKind
     }
 }
 

@@ -72,7 +72,8 @@ public final class OpenSkyClient: FlightProvider, @unchecked Sendable {
             URLQueryItem(name: "lamin", value: format(box.latMin)),
             URLQueryItem(name: "lomin", value: format(box.lonMin)),
             URLQueryItem(name: "lamax", value: format(box.latMax)),
-            URLQueryItem(name: "lomax", value: format(box.lonMax))
+            URLQueryItem(name: "lomax", value: format(box.lonMax)),
+            URLQueryItem(name: "extended", value: "1")
         ]
         guard let url = components.url else {
             throw FlightFeedError.transport(URLError(.badURL))

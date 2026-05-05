@@ -21,6 +21,7 @@ final class ImmersiveSceneRenderer {
     weak var selectionRing: ModelEntity?
     var aircraftEntitiesByID: [String: Entity] = [:]
     var aircraftVisualsByID: [String: Entity] = [:]
+    var aircraftVisualKindsByID: [String: TrafficKind] = [:]
     var nearbyDetailedAircraftByID: [String: Entity] = [:]
     var selectionProxyByAircraftID: [String: Entity] = [:]
     var selectionProxyRadiusByAircraftID: [String: Float] = [:]
@@ -173,7 +174,10 @@ struct ImmersiveView: View {
             aircraftList: aircraftList,
             aircraftPositions: aircraftPositions
         )
-        let detailedVisualAircraftIDs = nearbyDetailedAircraftIDs.union([referenceAircraft.id])
+        let referenceUsesDetailedAircraft = referenceAircraft.trafficKind == .aircraft
+        let detailedVisualAircraftIDs = referenceUsesDetailedAircraft
+            ? nearbyDetailedAircraftIDs.union([referenceAircraft.id])
+            : nearbyDetailedAircraftIDs
 
         let userPosition = Self.userPosition(renderer)
 
@@ -215,7 +219,8 @@ struct ImmersiveView: View {
             detailedAircraft.position = referencePosition
             detailedAircraft.orientation = referenceOrientation
             detailedAircraft.scale = model.aircraftScale
-            detailedAircraft.isEnabled = !nearbyDetailedAircraftIDs.contains(referenceAircraft.id)
+            detailedAircraft.isEnabled = referenceUsesDetailedAircraft
+                && !nearbyDetailedAircraftIDs.contains(referenceAircraft.id)
         }
 
         if let keyLight = renderer.keyLight {
@@ -259,11 +264,11 @@ struct ImmersiveView: View {
         }
     }
 
-    private static func makeSelectableAircraftEntity(id: String) -> Entity {
+    private static func makeSelectableAircraftEntity(id: String, trafficKind: TrafficKind) -> Entity {
         let root = Entity()
         root.name = "Aircraft:\(id)"
 
-        let visual = makeLightweightAircraftMarker()
+        let visual = makeVisualMarker(for: trafficKind)
         visual.name = "AircraftVisual"
         root.addChild(visual)
 
@@ -284,15 +289,25 @@ struct ImmersiveView: View {
         for aircraft in aircraftList {
             activeAircraftIDs.insert(aircraft.id)
             let entity = renderer.aircraftEntitiesByID[aircraft.id] ?? {
-                let newEntity = makeSelectableAircraftEntity(id: aircraft.id)
+                let newEntity = makeSelectableAircraftEntity(id: aircraft.id, trafficKind: aircraft.trafficKind)
                 root.addChild(newEntity)
                 renderer.aircraftEntitiesByID[aircraft.id] = newEntity
                 renderer.aircraftVisualsByID[aircraft.id] = newEntity.findEntity(named: "AircraftVisual")
+                renderer.aircraftVisualKindsByID[aircraft.id] = aircraft.trafficKind
                 return newEntity
             }()
 
             entity.position = aircraftPositions[aircraft.id] ?? model.realityPosition(for: aircraft)
             entity.orientation = Self.aircraftOrientation(for: aircraft, model: model)
+
+            if renderer.aircraftVisualKindsByID[aircraft.id] != aircraft.trafficKind {
+                renderer.aircraftVisualsByID[aircraft.id]?.removeFromParent()
+                let visual = makeVisualMarker(for: aircraft.trafficKind)
+                visual.name = "AircraftVisual"
+                entity.addChild(visual)
+                renderer.aircraftVisualsByID[aircraft.id] = visual
+                renderer.aircraftVisualKindsByID[aircraft.id] = aircraft.trafficKind
+            }
 
             if let visual = renderer.aircraftVisualsByID[aircraft.id] {
                 visual.scale = model.markerVisualScale(for: aircraft)
@@ -322,6 +337,7 @@ struct ImmersiveView: View {
             renderer.aircraftEntitiesByID[aircraftID]?.removeFromParent()
             renderer.aircraftEntitiesByID[aircraftID] = nil
             renderer.aircraftVisualsByID[aircraftID] = nil
+            renderer.aircraftVisualKindsByID[aircraftID] = nil
             renderer.nearbyDetailedAircraftByID[aircraftID] = nil
         }
     }
@@ -336,7 +352,10 @@ struct ImmersiveView: View {
             }
 
             let horizontalDistance = sqrt(position.x * position.x + position.z * position.z)
-            return horizontalDistance <= nearbyDetailedAircraftHorizontalRangeMeters ? aircraft.id : nil
+            return aircraft.trafficKind == .aircraft
+                && horizontalDistance <= nearbyDetailedAircraftHorizontalRangeMeters
+                ? aircraft.id
+                : nil
         })
     }
 
@@ -601,6 +620,15 @@ struct ImmersiveView: View {
         return makeLightweightAircraftMarker()
     }
 
+    private static func makeVisualMarker(for trafficKind: TrafficKind) -> Entity {
+        switch trafficKind {
+        case .aircraft:
+            return makeLightweightAircraftMarker()
+        case .groundVehicle:
+            return makeGroundVehicleMarker()
+        }
+    }
+
     private static func makeLightweightAircraftMarker() -> Entity {
         let root = Entity()
         let fuselageMaterial = SimpleMaterial(color: UIColor(white: 0.86, alpha: 0.86), isMetallic: false)
@@ -642,6 +670,49 @@ struct ImmersiveView: View {
         root.addChild(verticalTail)
         root.addChild(leftTip)
         root.addChild(rightTip)
+        return root
+    }
+
+    private static func makeGroundVehicleMarker() -> Entity {
+        let root = Entity()
+        let bodyMaterial = SimpleMaterial(color: UIColor.systemOrange.withAlphaComponent(0.92), isMetallic: false)
+        let cabMaterial = SimpleMaterial(color: UIColor.systemYellow.withAlphaComponent(0.9), isMetallic: false)
+        let darkMaterial = SimpleMaterial(color: UIColor(white: 0.08, alpha: 0.95), isMetallic: false)
+        let beaconMaterial = SimpleMaterial(color: UIColor.systemTeal.withAlphaComponent(0.95), isMetallic: false)
+
+        let chassis = ModelEntity(mesh: .generateBox(size: 1), materials: [bodyMaterial])
+        chassis.scale = SIMD3<Float>(1.05, 0.36, 3.25)
+        chassis.position = SIMD3<Float>(0, 0.22, 0.12)
+
+        let cab = ModelEntity(mesh: .generateBox(size: 1), materials: [cabMaterial])
+        cab.scale = SIMD3<Float>(0.82, 0.56, 0.88)
+        cab.position = SIMD3<Float>(0, 0.68, -0.78)
+
+        let rearDeck = ModelEntity(mesh: .generateBox(size: 1), materials: [darkMaterial])
+        rearDeck.scale = SIMD3<Float>(0.84, 0.08, 1.22)
+        rearDeck.position = SIMD3<Float>(0, 0.47, 0.78)
+
+        let beacon = ModelEntity(mesh: .generateSphere(radius: 0.16), materials: [beaconMaterial])
+        beacon.scale = SIMD3<Float>(1, 0.55, 1)
+        beacon.position = SIMD3<Float>(0, 1.0, -0.78)
+
+        let wheelOffsets: [SIMD3<Float>] = [
+            SIMD3<Float>(-0.62, 0.05, -1.12),
+            SIMD3<Float>(0.62, 0.05, -1.12),
+            SIMD3<Float>(-0.62, 0.05, 1.18),
+            SIMD3<Float>(0.62, 0.05, 1.18)
+        ]
+        for offset in wheelOffsets {
+            let wheel = ModelEntity(mesh: .generateSphere(radius: 0.22), materials: [darkMaterial])
+            wheel.scale = SIMD3<Float>(0.55, 0.82, 1)
+            wheel.position = offset
+            root.addChild(wheel)
+        }
+
+        root.addChild(chassis)
+        root.addChild(cab)
+        root.addChild(rearDeck)
+        root.addChild(beacon)
         return root
     }
 

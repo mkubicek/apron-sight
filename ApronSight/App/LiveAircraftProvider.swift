@@ -169,6 +169,15 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
     /// range. Sub-threshold GPS jitter no longer wipes the retention
     /// buffer.
     static let regionRestartThresholdMeters: Double = 1_000
+    /// Surface reports are sparse and velocity/track can be stale, so avoid
+    /// taxiing aircraft drifting far between OpenSky polls.
+    static let maximumGroundDeadReckoningSeconds: TimeInterval = 5
+    /// During landing and takeoff, stale vertical rate is the easiest way to
+    /// push an aircraft through the calibrated ground plane.
+    static let maximumLowAltitudeVerticalDeadReckoningSeconds: TimeInterval = 5
+    /// Only apply the ground-plane altitude clamp close to the observer's
+    /// calibrated ground altitude; this is a flat local approximation, not DEM.
+    static let lowAltitudeGroundClampWindowMeters: Double = 150
 
     private func aircraft(
         from flight: LiveFlight,
@@ -176,10 +185,13 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
         fallbackGroundAltitudeMeters: Double?
     ) -> Aircraft? {
         let altitudeMeters: Double
-        if let reportedAltitude = flight.altitudeMeters {
-            altitudeMeters = reportedAltitude
-        } else if flight.isOnGround, let fallbackGroundAltitudeMeters {
+        if flight.isOnGround {
+            guard let fallbackGroundAltitudeMeters else {
+                return nil
+            }
             altitudeMeters = fallbackGroundAltitudeMeters
+        } else if let reportedAltitude = flight.altitudeMeters {
+            altitudeMeters = reportedAltitude
         } else {
             return nil
         }
@@ -187,7 +199,17 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
         let speed = flight.velocityMetersPerSecond ?? 0
         let verticalRate = flight.isOnGround ? 0 : (flight.verticalRateMetersPerSecond ?? 0)
         let deadReckoningSpeed = flight.trueTrackDegrees == nil ? 0 : speed
-        let coordinate = GeoMath.deadReckonedCoordinate(
+        let horizontalElapsedSeconds = flight.isOnGround
+            ? min(elapsedSeconds, Self.maximumGroundDeadReckoningSeconds)
+            : elapsedSeconds
+        let lowAltitude = fallbackGroundAltitudeMeters.map {
+            altitudeMeters <= $0 + Self.lowAltitudeGroundClampWindowMeters
+        } ?? false
+        let verticalElapsedSeconds = lowAltitude
+            ? min(elapsedSeconds, Self.maximumLowAltitudeVerticalDeadReckoningSeconds)
+            : elapsedSeconds
+
+        let horizontalCoordinate = GeoMath.deadReckonedCoordinate(
             from: GeoCoordinate(
                 latitudeDegrees: flight.latitudeDegrees,
                 longitudeDegrees: flight.longitudeDegrees,
@@ -195,8 +217,17 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
             ),
             velocityMetersPerSecond: deadReckoningSpeed,
             trueTrackDegrees: flight.trueTrackDegrees ?? 0,
-            verticalRateMetersPerSecond: verticalRate,
-            elapsedSeconds: elapsedSeconds
+            verticalRateMetersPerSecond: 0,
+            elapsedSeconds: horizontalElapsedSeconds
+        )
+        let predictedAltitudeMeters = altitudeMeters + verticalRate * verticalElapsedSeconds
+        let coordinateAltitudeMeters = fallbackGroundAltitudeMeters.map { groundAltitudeMeters in
+            lowAltitude ? max(predictedAltitudeMeters, groundAltitudeMeters) : predictedAltitudeMeters
+        } ?? predictedAltitudeMeters
+        let coordinate = GeoCoordinate(
+            latitudeDegrees: horizontalCoordinate.latitudeDegrees,
+            longitudeDegrees: horizontalCoordinate.longitudeDegrees,
+            altitudeMeters: coordinateAltitudeMeters
         )
         let callsign = flight.callsign.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -208,8 +239,31 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
             velocityMetersPerSecond: speed,
             trueTrackDegrees: flight.trueTrackDegrees,
             verticalRateMetersPerSecond: flight.isOnGround ? 0 : flight.verticalRateMetersPerSecond,
-            isOnGround: flight.isOnGround
+            isOnGround: flight.isOnGround,
+            trafficKind: Self.trafficKind(for: flight)
         )
+    }
+
+    private static let knownZRHGroundVehicleCallsigns: Set<String> = [
+        "ATL783",
+        "ATL786",
+        "ORION1",
+        "TE21",
+        "TE22",
+        "TE25",
+        "VIKTOR36",
+        "ZEBRA1",
+        "ZEBRA7",
+        "ZEBRA8"
+    ]
+
+    private static func trafficKind(for flight: LiveFlight) -> TrafficKind {
+        let callsign = flight.callsign.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if flight.isSurfaceVehicle || knownZRHGroundVehicleCallsigns.contains(callsign) {
+            return .groundVehicle
+        }
+
+        return .aircraft
     }
 }
 

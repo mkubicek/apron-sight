@@ -99,6 +99,7 @@ enum LocationPresetOption: String, CaseIterable, Identifiable {
 final class AppModel: ObservableObject {
     static let a350900LengthMeters = 66.8
     static let importedAircraftLengthMeters = 5.0
+    static let groundVehicleLengthMeters = 8.0
     static let demoMarkerLengthMeters = 8.0
     static let defaultObserverHeightAboveGroundMeters = 1.6
     private static let selectionAngularRadiusDegrees = 2.5
@@ -407,7 +408,16 @@ final class AppModel: ObservableObject {
         let distance = max(relativeDistanceMeters(for: aircraft), 1)
         let minimumAngularLengthRadians = GeoMath.degreesToRadians(Self.minimumMarkerAngularLengthDegrees)
         let minimumVisibleLength = 2 * distance * tan(minimumAngularLengthRadians / 2)
-        return scale(forAircraftLengthMeters: max(aircraftLengthMeters, minimumVisibleLength))
+        return scale(forAircraftLengthMeters: max(visualLengthMeters(for: aircraft), minimumVisibleLength))
+    }
+
+    private func visualLengthMeters(for aircraft: Aircraft) -> Double {
+        switch aircraft.trafficKind {
+        case .aircraft:
+            return aircraftLengthMeters
+        case .groundVehicle:
+            return Self.groundVehicleLengthMeters
+        }
     }
 
     func selectAircraft(id: String) {

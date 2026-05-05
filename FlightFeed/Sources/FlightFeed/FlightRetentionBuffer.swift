@@ -104,6 +104,7 @@ public struct FlightRetentionBuffer: Sendable {
             trueTrackDegrees: trueTrack,
             verticalRateMetersPerSecond: verticalRate,
             isOnGround: new.isOnGround,
+            category: new.category ?? existing?.category,
             positionTimestamp: new.positionTimestamp,
             lastContact: new.lastContact
         )
