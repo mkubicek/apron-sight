@@ -46,9 +46,10 @@ enum OpenSkyParser {
             let onGround = (row[8] as? Bool) ?? false
             let velocity = row[9] as? Double
             let trueTrack = row[10] as? Double
-            let verticalRate = row.count > 11 ? row[11] as? Double : nil
+            let reportedVerticalRate = row.count > 11 ? row[11] as? Double : nil
             let geoAltitude = row.count > 13 ? row[13] as? Double : nil
-            let altitude = baroAltitude ?? geoAltitude
+            let altitude = geoAltitude ?? baroAltitude
+            let verticalRate = onGround ? 0 : reportedVerticalRate
 
             flights.append(
                 LiveFlight(

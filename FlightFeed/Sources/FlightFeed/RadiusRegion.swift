@@ -60,6 +60,18 @@ public struct RadiusRegion: Equatable, Sendable, Hashable {
         distanceMeters(toLatitude: lat, longitude: lon) <= radiusKm * 1000
     }
 
+    /// True if `self`'s centre is more than `thresholdMeters` away from
+    /// `previous`'s centre, or `previous` is nil. Used to suppress feed
+    /// restarts from sub-threshold GPS jitter — a 50 km bbox doesn't
+    /// meaningfully change for a 5-metre observer shift.
+    public func centerMoved(beyondMeters thresholdMeters: Double, from previous: RadiusRegion?) -> Bool {
+        guard let previous else { return true }
+        return previous.distanceMeters(
+            toLatitude: latitudeDegrees,
+            longitude: longitudeDegrees
+        ) > thresholdMeters
+    }
+
     static func haversineMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double) -> Double {
         let r = 6_371_000.0
         let φ1 = lat1 * .pi / 180

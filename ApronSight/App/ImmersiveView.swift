@@ -15,8 +15,6 @@ final class ImmersiveSceneRenderer {
     weak var projection: Entity?
     weak var altitudeLine: ModelEntity?
     weak var distanceOverlay: Entity?
-    weak var groundCursor: Entity?
-    weak var groundCursorLine: ModelEntity?
     weak var compassOverlay: Entity?
     weak var headAnchor: AnchorEntity?
     weak var selectionProxyRoot: Entity?
@@ -97,17 +95,6 @@ struct ImmersiveView: View {
             distanceOverlay.position = model.observerGroundRealityPosition
             content.add(distanceOverlay)
             renderer.distanceOverlay = distanceOverlay
-
-            let groundCursor = Self.makeGroundCursor()
-            groundCursor.name = "GroundCursor"
-            groundCursor.position = model.groundCursorRealityPosition
-            content.add(groundCursor)
-            renderer.groundCursor = groundCursor
-
-            let groundCursorLine = Self.makeGroundCursorLine()
-            groundCursorLine.name = "GroundCursorLine"
-            content.add(groundCursorLine)
-            renderer.groundCursorLine = groundCursorLine
 
             let compassOverlay = Self.makeCompassOverlay()
             compassOverlay.name = "CompassOverlay"
@@ -251,20 +238,6 @@ struct ImmersiveView: View {
         if let distanceOverlay = renderer.distanceOverlay {
             distanceOverlay.position = model.observerGroundRealityPosition
             distanceOverlay.isEnabled = model.showDistanceOverlay
-        }
-
-        if let groundCursor = renderer.groundCursor {
-            groundCursor.position = model.groundCursorRealityPosition
-            groundCursor.isEnabled = model.showGroundCursor
-        }
-
-        if let groundCursorLine = renderer.groundCursorLine {
-            updateLine(
-                groundCursorLine,
-                from: model.observerGroundRealityPosition,
-                to: model.groundCursorRealityPosition
-            )
-            groundCursorLine.isEnabled = model.showGroundCursor
         }
 
         if let compassOverlay = renderer.compassOverlay {
@@ -436,7 +409,7 @@ struct ImmersiveView: View {
     /// radius. Sized at runtime via `entity.scale`. Triangles wound CCW from
     /// +Z so the ring is front-facing toward the user once `+Z` is rotated
     /// to point at them. Uses `SimpleMaterial` to match the transparent-ring
-    /// pattern already proven in `makeDistanceOverlay` / `makeGroundCursor`.
+    /// pattern already proven in `makeDistanceOverlay`.
     private static func makeSelectionRing() -> ModelEntity {
         let segmentCount = 96
         let outerRadius: Float = 1.0
@@ -698,41 +671,6 @@ struct ImmersiveView: View {
             targetPosition.z
         )
         line.scale = SIMD3<Float>(0.05, height, 0.05)
-    }
-
-    private static func makeGroundCursor() -> Entity {
-        let root = Entity()
-        let cursorMaterial = SimpleMaterial(color: UIColor.systemGreen.withAlphaComponent(0.72), isMetallic: false)
-        let centerMaterial = SimpleMaterial(color: UIColor.white.withAlphaComponent(0.9), isMetallic: false)
-
-        let ring = makeRing(radius: 2.1, material: cursorMaterial)
-        ring.position = SIMD3<Float>(0, 0.08, 0)
-
-        let crossA = makeHorizontalLine(
-            from: SIMD3<Float>(-3, 0.08, 0),
-            to: SIMD3<Float>(3, 0.08, 0),
-            thickness: 0.09,
-            material: cursorMaterial
-        )
-        let crossB = makeHorizontalLine(
-            from: SIMD3<Float>(0, 0.08, -3),
-            to: SIMD3<Float>(0, 0.08, 3),
-            thickness: 0.09,
-            material: cursorMaterial
-        )
-        let center = ModelEntity(mesh: .generateSphere(radius: 0.22), materials: [centerMaterial])
-        center.position = SIMD3<Float>(0, 0.35, 0)
-
-        root.addChild(ring)
-        root.addChild(crossA)
-        root.addChild(crossB)
-        root.addChild(center)
-        return root
-    }
-
-    private static func makeGroundCursorLine() -> ModelEntity {
-        let material = SimpleMaterial(color: UIColor.systemGreen.withAlphaComponent(0.42), isMetallic: false)
-        return ModelEntity(mesh: .generateBox(size: 1), materials: [material])
     }
 
     private static func makeDistanceOverlay() -> Entity {

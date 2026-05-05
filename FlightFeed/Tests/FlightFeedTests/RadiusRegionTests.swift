@@ -40,4 +40,41 @@ final class RadiusRegionTests: XCTestCase {
         XCTAssertEqual(box.lonMin, -180)
         XCTAssertEqual(box.lonMax, 180)
     }
+
+    // MARK: - centerMoved hysteresis
+
+    func testCenterMovedReturnsTrueWhenPreviousNil() {
+        let region = RadiusRegion(latitudeDegrees: 47.45, longitudeDegrees: 8.55, radiusKm: 50)
+        XCTAssertTrue(region.centerMoved(beyondMeters: 1_000, from: nil),
+                      "First start has no previous region, must restart")
+    }
+
+    func testCenterMovedReturnsFalseForIdenticalCentre() {
+        let region = RadiusRegion(latitudeDegrees: 47.45, longitudeDegrees: 8.55, radiusKm: 50)
+        XCTAssertFalse(region.centerMoved(beyondMeters: 1_000, from: region))
+    }
+
+    func testCenterMovedReturnsFalseForSubThresholdShift() {
+        // ~5 m shift in latitude (well under 1 km threshold).
+        let previous = RadiusRegion(latitudeDegrees: 47.450000, longitudeDegrees: 8.55, radiusKm: 50)
+        let next = RadiusRegion(latitudeDegrees: 47.450050, longitudeDegrees: 8.55, radiusKm: 50)
+        XCTAssertFalse(next.centerMoved(beyondMeters: 1_000, from: previous),
+                       "Sub-metre GPS jitter must not trigger feed restart")
+    }
+
+    func testCenterMovedReturnsTrueForSuperThresholdShift() {
+        // ~10 km shift north — clearly above 1 km threshold.
+        let previous = RadiusRegion(latitudeDegrees: 47.45, longitudeDegrees: 8.55, radiusKm: 50)
+        let next = RadiusRegion(latitudeDegrees: 47.55, longitudeDegrees: 8.55, radiusKm: 50)
+        XCTAssertTrue(next.centerMoved(beyondMeters: 1_000, from: previous))
+    }
+
+    func testCenterMovedAtThresholdBoundary() {
+        // ~999 m shift — should NOT trigger; ~1100 m should.
+        let previous = RadiusRegion(latitudeDegrees: 0, longitudeDegrees: 0, radiusKm: 50)
+        let near = RadiusRegion(latitudeDegrees: 999.0 / 111_320.0, longitudeDegrees: 0, radiusKm: 50)
+        let far = RadiusRegion(latitudeDegrees: 1100.0 / 111_320.0, longitudeDegrees: 0, radiusKm: 50)
+        XCTAssertFalse(near.centerMoved(beyondMeters: 1_000, from: previous))
+        XCTAssertTrue(far.centerMoved(beyondMeters: 1_000, from: previous))
+    }
 }

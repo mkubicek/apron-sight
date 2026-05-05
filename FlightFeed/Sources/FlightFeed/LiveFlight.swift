@@ -15,7 +15,7 @@ public struct LiveFlight: Equatable, Identifiable, Sendable, Hashable {
     public var originCountry: String?
     public var latitudeDegrees: Double
     public var longitudeDegrees: Double
-    /// Barometric altitude when available, geometric altitude as fallback.
+    /// Geometric altitude when available, barometric altitude as fallback.
     public var altitudeMeters: Double?
     public var velocityMetersPerSecond: Double?
     /// True track over ground, 0° = north, clockwise.

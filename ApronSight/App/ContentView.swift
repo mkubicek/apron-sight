@@ -1,5 +1,6 @@
 import FlightFeed
 import Foundation
+import MapKit
 import SwiftUI
 
 struct ContentView: View {
@@ -378,7 +379,6 @@ private struct PlanespottersImage: Decodable {
 private enum DebugTab: String, CaseIterable, Identifiable {
     case main
     case world
-    case tuning
 
     var id: String { rawValue }
 
@@ -386,7 +386,6 @@ private enum DebugTab: String, CaseIterable, Identifiable {
         switch self {
         case .main: return "Main"
         case .world: return "World"
-        case .tuning: return "Tuning"
         }
     }
 }
@@ -413,8 +412,6 @@ private struct DebugPanel: View {
                         mainTab
                     case .world:
                         worldTab
-                    case .tuning:
-                        tuningTab
                     }
                 }
             }
@@ -452,14 +449,14 @@ private struct DebugPanel: View {
             }
 
             if model.locationPresetOption == .custom {
-                // 6-decimal precision is ≈0.11 m at the equator and
-                // <0.08 m at northern latitudes — well under the
-                // ±1 m target users want for a custom observer.
+                ObserverMapPicker(model: model)
+                // 6-decimal precision (≈0.11 m at the equator) for
+                // typing exact coordinates when you have them on hand.
                 CoordinateField(title: "Observer lat", value: $model.observerLatitude, fractionDigits: 6)
                 CoordinateField(title: "Observer lon", value: $model.observerLongitude, fractionDigits: 6)
             }
 
-            CoordinateField(title: "Observer alt", value: $model.observerAltitude, fractionDigits: 1)
+            ObserverAltitudeWheel(value: $model.observerAltitude)
         }
 
         Divider()
@@ -489,34 +486,18 @@ private struct DebugPanel: View {
 
     @ViewBuilder
     private var worldTab: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Eye height")
                 .font(.headline)
-            CoordinateField(title: "Eye height", value: $model.observerHeightAboveGroundMeters, fractionDigits: 1)
-            DebugRow(title: "Manual ground", value: model.observerGroundElevationMeters, suffix: "m", fractionDigits: 1)
-        }
 
-        Divider()
-
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Ground cursor")
-                    .font(.headline)
-                Spacer()
-                Button {
-                    model.resetGroundCursor()
-                } label: {
-                    Label("Reset", systemImage: "arrow.counterclockwise")
-                }
-                .buttonStyle(.borderless)
+            HStack(spacing: 8) {
+                eyeHeightPresetButton(title: "Sitting", meters: 1.35)
+                eyeHeightPresetButton(title: "Standing", meters: 1.78)
+                eyeHeightPresetButton(title: "Tall", meters: 1.90)
             }
 
-            Toggle("Show cursor", isOn: $model.showGroundCursor)
-            TuningWheel(title: "Left / Right", value: $model.groundCursorRightOffsetMeters, range: -500 ... 500, step: 0.1)
-            TuningWheel(title: "Back / Forward", value: $model.groundCursorForwardOffsetMeters, range: -500 ... 500, step: 0.1)
-            DebugRow(title: "Cursor distance", value: model.groundCursorDistanceMeters, suffix: "m", fractionDigits: 1)
-            DebugRow(title: "Cursor bearing", value: model.groundCursorWorldBearingDegrees, suffix: "deg", fractionDigits: 1)
-            DebugRow(title: "Cursor ground", value: model.groundCursorCoordinate.altitudeMeters, suffix: "m", fractionDigits: 1)
+            EyeHeightWheel(value: $model.observerHeightAboveGroundMeters)
+            DebugRow(title: "Manual ground", value: model.observerGroundElevationMeters, suffix: "m", fractionDigits: 1)
         }
 
         Divider()
@@ -531,83 +512,22 @@ private struct DebugPanel: View {
         }
     }
 
-    @ViewBuilder
-    private var tuningTab: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            DebugRow(title: "Primary lat", value: model.targetCoordinate.latitudeDegrees, suffix: "deg", fractionDigits: 6)
-            DebugRow(title: "Primary lon", value: model.targetCoordinate.longitudeDegrees, suffix: "deg", fractionDigits: 6)
-            DebugRow(title: "Primary alt", value: model.targetCoordinate.altitudeMeters, suffix: "m", fractionDigits: 1)
-            DebugRow(title: "Observer ground", value: model.observerGroundElevationMeters, suffix: "m", fractionDigits: 1)
-            DebugRow(title: "Observer eye alt", value: model.observerAltitude, suffix: "m", fractionDigits: 1)
-            DebugRow(title: "Primary ground", value: model.targetGroundElevationMeters, suffix: "m", fractionDigits: 1)
-            DebugRow(title: "Aircraft ground", value: model.aircraftGroundElevationMeters, suffix: "m", fractionDigits: 1)
-            DebugRow(title: "Horizontal", value: model.placement.horizontalDistanceMeters, suffix: "m", fractionDigits: 1)
-            DebugRow(title: "Distance", value: model.placement.slantDistanceMeters, suffix: "m", fractionDigits: 1)
-            DebugRow(title: "Bearing", value: model.placement.bearingDegrees, suffix: "deg", fractionDigits: 1)
-            DebugRow(title: "Elevation", value: model.placement.elevationDegrees, suffix: "deg", fractionDigits: 1)
-            DebugRow(title: "Relative bearing", value: model.relativeBearingDegrees, suffix: "deg", fractionDigits: 1)
-            DebugRow(title: "Aircraft yaw", value: model.aircraftRealityYawDegrees, suffix: "deg", fractionDigits: 1)
-            DebugRow(title: "Tuned distance", value: model.tunedDistanceMeters, suffix: "m", fractionDigits: 1)
-            DebugRow(title: "Aircraft length", value: model.aircraftLengthMeters, suffix: "m", fractionDigits: 1)
-            DebugRow(title: "Visual length", value: model.estimatedAircraftAngularLengthDegrees, suffix: "deg", fractionDigits: 1)
-        }
-
-        Divider()
-
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Geo target tuning")
-                    .font(.headline)
-                Spacer()
-                Button {
-                    model.resetTargetTuning()
-                } label: {
-                    Label("Reset", systemImage: "arrow.counterclockwise")
-                }
-                .buttonStyle(.borderless)
+    private func eyeHeightPresetButton(title: String, meters: Double) -> some View {
+        let isCurrent = abs(model.observerHeightAboveGroundMeters - meters) < 0.005
+        return Button {
+            model.observerHeightAboveGroundMeters = meters
+        } label: {
+            VStack(spacing: 2) {
+                Text(title).font(.caption.weight(.semibold))
+                Text("\(Int((meters * 100).rounded())) cm")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-
-            TuningWheel(title: "East", value: $model.targetEastOffsetMeters, range: -500 ... 500, step: 0.1)
-            TuningWheel(title: "North", value: $model.targetNorthOffsetMeters, range: -500 ... 500, step: 0.1)
-            TuningWheel(title: "Altitude", value: $model.targetAltitudeOffsetMeters, range: -500 ... 500, step: 0.1)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
         }
-
-        Divider()
-
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Local aircraft tuning")
-                .font(.headline)
-
-            TuningWheel(title: "Left / Right", value: $model.localRightOffsetMeters, range: -500 ... 500, step: 0.1)
-            TuningWheel(title: "Back / Forward", value: $model.localForwardOffsetMeters, range: -500 ... 500, step: 0.1)
-            AngleWheel(title: "Yaw offset", value: $model.aircraftYawOffsetDegrees, range: -180 ... 180, step: 0.1)
-        }
-
-        Divider()
-
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Aircraft size")
-                    .font(.headline)
-                Spacer()
-                Button {
-                    model.useDemoMarkerSize()
-                } label: {
-                    Label("Marker", systemImage: "smallcircle.filled.circle")
-                }
-                .buttonStyle(.borderless)
-
-                Button {
-                    model.useRealA350Size()
-                } label: {
-                    Label("Real", systemImage: "airplane")
-                }
-                .buttonStyle(.borderless)
-            }
-
-            TuningWheel(title: "Length", value: $model.aircraftLengthMeters, range: 2 ... 80, step: 0.1)
-            DebugRow(title: "A350-900 reference", value: AppModel.a350900LengthMeters, suffix: "m", fractionDigits: 1)
-        }
+        .buttonStyle(.bordered)
+        .tint(isCurrent ? .accentColor : Color.secondary)
     }
 
     private var locationPresetBinding: Binding<LocationPresetOption> {
@@ -629,16 +549,42 @@ private struct DebugPanel: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-        case .fixed(let accuracyMeters):
-            HStack(spacing: 6) {
-                Image(systemName: "location.fill")
-                    .foregroundStyle(.green)
-                Text("GPS fix · ±\(accuracyMeters, format: .number.precision(.fractionLength(accuracyMeters >= 10 ? 0 : 1))) m")
+        case .fixed(let horizontal, let vertical):
+            HStack(spacing: 8) {
+                Image(systemName: model.gpsPositionLocked ? "lock.fill" : "location.fill")
+                    .foregroundStyle(model.gpsPositionLocked ? .yellow : .green)
+                Text(gpsAccuracyLabel(horizontal: horizontal, vertical: vertical))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+
+                Spacer()
+
+                Button {
+                    model.setGPSPositionLocked(!model.gpsPositionLocked)
+                } label: {
+                    Label(
+                        model.gpsPositionLocked ? "Unlock" : "Lock",
+                        systemImage: model.gpsPositionLocked ? "lock.open" : "lock"
+                    )
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
         }
+    }
+
+    private func gpsAccuracyLabel(horizontal: Double, vertical: Double?) -> String {
+        let horizontalText = "±\(formatAccuracy(horizontal)) m"
+        guard let vertical else {
+            return "GPS fix · \(horizontalText)"
+        }
+        return "GPS fix · \(horizontalText) / ±\(formatAccuracy(vertical)) m alt"
+    }
+
+    private func formatAccuracy(_ meters: Double) -> String {
+        let digits = meters >= 10 ? 0 : 1
+        return meters.formatted(.number.precision(.fractionLength(digits)))
     }
 }
 
@@ -677,12 +623,6 @@ private struct CompassCalibrationView: View {
                 .aspectRatio(1, contentMode: .fit)
                 .frame(maxWidth: 380, maxHeight: 380)
                 .frame(maxWidth: .infinity, alignment: .center)
-
-            VStack(alignment: .leading, spacing: 8) {
-                DebugRow(title: "Forward bearing", value: model.yawOffsetDegrees, suffix: "deg", fractionDigits: 0)
-                DebugRow(title: "Target bearing", value: model.placement.bearingDegrees, suffix: "deg", fractionDigits: 1)
-                DebugRow(title: "Relative target", value: model.relativeBearingDegrees, suffix: "deg", fractionDigits: 1)
-            }
 
             HStack {
                 Text(model.calibrationStatus)
@@ -810,7 +750,8 @@ private struct CompassDial: View {
             center: center
         )
         let isSelected = aircraft.id == model.selectedAircraftID
-        let trackDegrees = aircraft.trueTrackDegrees
+        let speed = aircraft.velocityMetersPerSecond ?? 0
+        let trackDegrees = speed >= Self.minimumDirectionalSpeedMetersPerSecond ? aircraft.trueTrackDegrees : nil
 
         Group {
             if let trackDegrees {
@@ -819,13 +760,13 @@ private struct CompassDial: View {
                     .font(.system(size: isSelected ? 18 : 11))
                     .foregroundStyle(isSelected ? .yellow : .secondary)
                     // SF Symbol "airplane" defaults to nose pointing
-                    // up-right at 45°; subtracting that puts a 0°
+                    // up-right at 45 deg; subtracting that puts a 0 deg
                     // relative track straight up the dial.
                     .rotationEffect(.degrees(relativeTrack - Self.airplaneSymbolDefaultRotationDegrees))
             } else if isSelected {
-                Image(systemName: "airplane")
-                    .font(.title3)
-                    .foregroundStyle(.yellow)
+                Circle()
+                    .strokeBorder(.yellow, lineWidth: 2)
+                    .frame(width: 10, height: 10)
             } else {
                 Circle()
                     .fill(.secondary)
@@ -842,6 +783,7 @@ private struct CompassDial: View {
         }
     }
 
+    private static let minimumDirectionalSpeedMetersPerSecond: Double = 1
     private static let airplaneSymbolDefaultRotationDegrees: Double = 45
 
     private func point(
@@ -890,6 +832,114 @@ private struct TuningWheel: View {
             nudgeAmounts: [-10, -1, -0.1, 0.1, 1, 10]
         )
     }
+}
+
+/// Observer altitude wheel: 1 m steps over a wide range, with metre +
+/// decametre + hectometre nudges for fast coarse moves.
+private struct ObserverAltitudeWheel: View {
+    @Binding var value: Double
+
+    var body: some View {
+        PrecisionWheelControl(
+            title: "Observer alt",
+            value: $value,
+            range: -200 ... 6000,
+            step: 1,
+            unit: "m",
+            fractionDigits: 0,
+            nudgeAmounts: [-100, -10, -1, 1, 10, 100]
+        )
+    }
+}
+
+/// Eye height wheel: 1 cm resolution over the realistic body-height
+/// range so the preset buttons handle the common cases and the wheel
+/// fine-tunes from there.
+private struct EyeHeightWheel: View {
+    @Binding var value: Double
+
+    var body: some View {
+        PrecisionWheelControl(
+            title: "Eye height",
+            value: $value,
+            range: 0.5 ... 2.5,
+            step: 0.01,
+            unit: "m",
+            fractionDigits: 2,
+            nudgeAmounts: [-0.1, -0.01, 0.01, 0.1]
+        )
+    }
+}
+
+/// Apple-Maps view bound to the observer coordinate. Tapping the map
+/// drops the pin at that point and writes lat/lon back into AppModel.
+/// Uses MapKit's `MapReader.proxy.convert(_:from:)` for screen→geo
+/// conversion, no API key needed.
+///
+/// The marker rebuilds every render from `model.observerLatitude/
+/// Longitude`, so external edits (e.g. typing into the CoordinateField
+/// below) do move the pin. The camera centers on the current observer
+/// at first appearance only — pan/zoom afterwards is user-driven and
+/// not auto-snapped back. To follow external edits with the camera,
+/// add an `.onChange` that updates `cameraPosition`.
+private struct ObserverMapPicker: View {
+    @ObservedObject var model: AppModel
+
+    @State private var cameraPosition: MapCameraPosition
+
+    init(model: AppModel) {
+        self.model = model
+        _cameraPosition = State(initialValue: .region(Self.region(
+            latitude: model.observerLatitude,
+            longitude: model.observerLongitude
+        )))
+    }
+
+    var body: some View {
+        MapReader { proxy in
+            Map(position: $cameraPosition) {
+                Marker("Observer", coordinate: CLLocationCoordinate2D(
+                    latitude: model.observerLatitude,
+                    longitude: model.observerLongitude
+                ))
+                .tint(.yellow)
+            }
+            .frame(height: 220)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .onTapGesture(coordinateSpace: .local) { point in
+                if let coordinate = proxy.convert(point, from: .local) {
+                    model.observerLatitude = coordinate.latitude
+                    model.observerLongitude = coordinate.longitude
+                }
+            }
+            // Recenter when AppModel coordinates change externally
+            // (CoordinateField below, GPS preset switch, programmatic
+            // updates). Uses a single combined onChange so the camera
+            // sees a consistent lat/lon pair instead of two intermediate
+            // states.
+            .onChange(of: ObserverCoordinateKey(
+                latitude: model.observerLatitude,
+                longitude: model.observerLongitude
+            )) { _, key in
+                cameraPosition = .region(Self.region(
+                    latitude: key.latitude,
+                    longitude: key.longitude
+                ))
+            }
+        }
+    }
+
+    private static func region(latitude: Double, longitude: Double) -> MKCoordinateRegion {
+        MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+            span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+        )
+    }
+}
+
+private struct ObserverCoordinateKey: Equatable {
+    let latitude: Double
+    let longitude: Double
 }
 
 private struct AngleWheel: View {

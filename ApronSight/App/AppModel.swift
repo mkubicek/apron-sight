@@ -21,10 +21,11 @@ enum GPSStatus: Equatable {
     /// GPS preset selected, awaiting first valid fix.
     case locating
     /// At least one valid fix received since the preset was activated.
-    /// The associated value is CoreLocation's reported horizontal
-    /// accuracy in meters (radius of 68 % confidence circle around
-    /// the reported lat/lon).
-    case fixed(horizontalAccuracyMeters: Double)
+    /// Both accuracies are CoreLocation's 68 % confidence intervals in
+    /// meters. `verticalAccuracyMeters` is `nil` when CoreLocation
+    /// reports a negative value (altitude estimate invalid, e.g. on
+    /// Wi-Fi-only iPad or before vertical GNSS fix).
+    case fixed(horizontalAccuracyMeters: Double, verticalAccuracyMeters: Double?)
 }
 
 struct AircraftStatus {
@@ -117,19 +118,10 @@ final class AppModel: ObservableObject {
     @Published var yawOffsetDegrees: Double {
         didSet { persistYawIfNeeded() }
     }
-    @Published var targetEastOffsetMeters: Double
-    @Published var targetNorthOffsetMeters: Double
-    @Published var targetAltitudeOffsetMeters: Double
-    @Published var localRightOffsetMeters: Double
-    @Published var localForwardOffsetMeters: Double
-    @Published var aircraftYawOffsetDegrees: Double
-    @Published var aircraftLengthMeters: Double
+    let aircraftLengthMeters: Double = AppModel.a350900LengthMeters
     @Published var verticalCalibrationOffsetMeters: Double {
         didSet { persistVerticalCalibrationIfNeeded() }
     }
-    @Published var showGroundCursor: Bool
-    @Published var groundCursorRightOffsetMeters: Double
-    @Published var groundCursorForwardOffsetMeters: Double
     @Published var showCompassOverlay: Bool
     @Published var showDistanceOverlay: Bool
     @Published var showProjectionShadow: Bool
@@ -141,6 +133,11 @@ final class AppModel: ObservableObject {
     @Published var lastFlightError: String?
     @Published var lastLocationError: String?
     @Published private(set) var gpsStatus: GPSStatus = .idle
+    /// When true, incoming GPS fixes update the displayed accuracy but
+    /// don't write new coordinates into the observer. Used to freeze
+    /// the world model against GPS jitter once the user has a fix
+    /// they're happy with.
+    @Published private(set) var gpsPositionLocked: Bool = false
     /// When non-nil, the next gaze pinch in the immersive scene is consumed
     /// as a calibration sample for the named axis (yaw or altitude) against
     /// the currently selected aircraft. Nil = normal selection behavior.
@@ -159,17 +156,7 @@ final class AppModel: ObservableObject {
         observer: GeoCoordinate = DemoScenario.defaultObserver,
         observerHeightAboveGroundMeters: Double = AppModel.defaultObserverHeightAboveGroundMeters,
         yawOffsetDegrees: Double = 0,
-        targetEastOffsetMeters: Double = 0,
-        targetNorthOffsetMeters: Double = 0,
-        targetAltitudeOffsetMeters: Double = 0,
-        localRightOffsetMeters: Double = 0,
-        localForwardOffsetMeters: Double = 0,
-        aircraftYawOffsetDegrees: Double = 0,
-        aircraftLengthMeters: Double = AppModel.a350900LengthMeters,
         verticalCalibrationOffsetMeters: Double = 0,
-        showGroundCursor: Bool = true,
-        groundCursorRightOffsetMeters: Double = 0,
-        groundCursorForwardOffsetMeters: Double = 25,
         showCompassOverlay: Bool = true,
         showDistanceOverlay: Bool = true,
         showProjectionShadow: Bool = true,
@@ -185,17 +172,7 @@ final class AppModel: ObservableObject {
         self.observerAltitude = observer.altitudeMeters
         self.observerHeightAboveGroundMeters = observerHeightAboveGroundMeters
         self.yawOffsetDegrees = yawOffsetDegrees
-        self.targetEastOffsetMeters = targetEastOffsetMeters
-        self.targetNorthOffsetMeters = targetNorthOffsetMeters
-        self.targetAltitudeOffsetMeters = targetAltitudeOffsetMeters
-        self.localRightOffsetMeters = localRightOffsetMeters
-        self.localForwardOffsetMeters = localForwardOffsetMeters
-        self.aircraftYawOffsetDegrees = aircraftYawOffsetDegrees
-        self.aircraftLengthMeters = aircraftLengthMeters
         self.verticalCalibrationOffsetMeters = verticalCalibrationOffsetMeters
-        self.showGroundCursor = showGroundCursor
-        self.groundCursorRightOffsetMeters = groundCursorRightOffsetMeters
-        self.groundCursorForwardOffsetMeters = groundCursorForwardOffsetMeters
         self.showCompassOverlay = showCompassOverlay
         self.showDistanceOverlay = showDistanceOverlay
         self.showProjectionShadow = showProjectionShadow
@@ -272,18 +249,6 @@ final class AppModel: ObservableObject {
         GeoMath.localCoordinate(for: placement, yawOffsetDegrees: yawOffsetDegrees)
     }
 
-    var geospatialRealityPosition: SIMD3<Float> {
-        realityPosition(for: primaryAircraft, includingTuning: false)
-    }
-
-    var localPlacementOffset: SIMD3<Float> {
-        SIMD3<Float>(
-            Float(localRightOffsetMeters),
-            0,
-            Float(-localForwardOffsetMeters)
-        )
-    }
-
     var targetRealityPosition: SIMD3<Float> {
         realityPosition(for: primaryAircraft)
     }
@@ -321,51 +286,6 @@ final class AppModel: ObservableObject {
         return GeoMath.radiansToDegrees(2 * atan((aircraftLengthMeters / 2) / distance))
     }
 
-    var groundCursorENUOffset: (east: Double, north: Double) {
-        GeoMath.enuHorizontalOffset(
-            localX: groundCursorRightOffsetMeters,
-            localZ: -groundCursorForwardOffsetMeters,
-            yawOffsetDegrees: yawOffsetDegrees
-        )
-    }
-
-    var groundCursorDistanceMeters: Double {
-        hypot(groundCursorRightOffsetMeters, groundCursorForwardOffsetMeters)
-    }
-
-    var groundCursorWorldBearingDegrees: Double {
-        guard groundCursorDistanceMeters > 0 else {
-            return yawOffsetDegrees
-        }
-
-        let relativeBearing = GeoMath.radiansToDegrees(atan2(groundCursorRightOffsetMeters, groundCursorForwardOffsetMeters))
-        return GeoMath.normalizedDegrees(yawOffsetDegrees + relativeBearing)
-    }
-
-    var groundCursorCoordinate: GeoCoordinate {
-        let offset = groundCursorENUOffset
-        var coordinate = GeoMath.coordinate(
-            offsetFrom: GeoCoordinate(
-                latitudeDegrees: observerLatitude,
-                longitudeDegrees: observerLongitude,
-                altitudeMeters: observerGroundElevationMeters
-            ),
-            eastMeters: offset.east,
-            northMeters: offset.north,
-            upMeters: 0
-        )
-        coordinate.altitudeMeters = observerGroundElevationMeters
-        return coordinate
-    }
-
-    var groundCursorRealityPosition: SIMD3<Float> {
-        SIMD3<Float>(
-            Float(groundCursorRightOffsetMeters),
-            observerGroundRealityPosition.y,
-            Float(-groundCursorForwardOffsetMeters)
-        )
-    }
-
     var relativeBearingDegrees: Double {
         relativeBearingDegrees(for: primaryAircraft)
     }
@@ -399,32 +319,20 @@ final class AppModel: ObservableObject {
     }
 
     func displayCoordinate(for aircraft: Aircraft) -> GeoCoordinate {
-        guard aircraft.id == selectedAircraftID else {
-            return aircraft.coordinate
-        }
-
-        return GeoMath.coordinate(
-            offsetFrom: aircraft.coordinate,
-            eastMeters: targetEastOffsetMeters,
-            northMeters: targetNorthOffsetMeters,
-            upMeters: targetAltitudeOffsetMeters
-        )
+        aircraft.coordinate
     }
 
     func placement(for aircraft: Aircraft) -> GeoPlacement {
         GeoMath.placement(observer: observer, target: displayCoordinate(for: aircraft))
     }
 
-    func realityPosition(for aircraft: Aircraft, includingTuning: Bool = true) -> SIMD3<Float> {
+    func realityPosition(for aircraft: Aircraft) -> SIMD3<Float> {
         let coordinate = GeoMath.localCoordinate(for: placement(for: aircraft), yawOffsetDegrees: yawOffsetDegrees)
         var position = SIMD3<Float>(Float(coordinate.x), Float(coordinate.y), Float(coordinate.z))
         // Vertical calibration applies to aircraft AND ground equally, so the
         // aircraft-to-ground geometry stays constant. `observerGroundElevationMeters`
         // already includes this offset on the ground side.
         position.y += Float(verticalCalibrationOffsetMeters)
-        if includingTuning && aircraft.id == selectedAircraftID {
-            position += localPlacementOffset
-        }
         return position
     }
 
@@ -448,7 +356,7 @@ final class AppModel: ObservableObject {
 
     func aircraftRealityYawDegrees(for aircraft: Aircraft) -> Double {
         let track = aircraft.trueTrackDegrees ?? placement(for: aircraft).bearingDegrees
-        return GeoMath.normalizedDegrees(yawOffsetDegrees - track + aircraftYawOffsetDegrees)
+        return GeoMath.normalizedDegrees(yawOffsetDegrees - track)
     }
 
     /// Pitch angle the aircraft model should display, derived from the
@@ -458,6 +366,7 @@ final class AppModel: ObservableObject {
     /// from short-window altitude deltas and can spike well past
     /// realistic airframe pitch in turbulent or low-quality data.
     func aircraftRealityPitchDegrees(for aircraft: Aircraft) -> Double {
+        guard !aircraft.isOnGround else { return 0 }
         let vertical = aircraft.verticalRateMetersPerSecond ?? 0
         let horizontal = aircraft.velocityMetersPerSecond ?? 0
         guard horizontal > 1.0 else { return 0 }
@@ -503,28 +412,6 @@ final class AppModel: ObservableObject {
 
     func clearSelectedAircraft() {
         selectedAircraftID = nil
-    }
-
-    func resetTargetTuning() {
-        targetEastOffsetMeters = 0
-        targetNorthOffsetMeters = 0
-        targetAltitudeOffsetMeters = 0
-        localRightOffsetMeters = 0
-        localForwardOffsetMeters = 0
-        aircraftYawOffsetDegrees = 0
-    }
-
-    func useRealA350Size() {
-        aircraftLengthMeters = Self.a350900LengthMeters
-    }
-
-    func useDemoMarkerSize() {
-        aircraftLengthMeters = Self.demoMarkerLengthMeters
-    }
-
-    func resetGroundCursor() {
-        groundCursorRightOffsetMeters = 0
-        groundCursorForwardOffsetMeters = 25
     }
 
     /// Arms compass calibration on the named axis. The next gaze pinch in
@@ -768,6 +655,7 @@ final class AppModel: ObservableObject {
             gpsProvider.stop()
             gpsStatus = .idle
             lastLocationError = nil
+            gpsPositionLocked = false
         }
     }
 
@@ -777,16 +665,35 @@ final class AppModel: ObservableObject {
     /// a single `reconfigureFlightProvider` after all three writes settle
     /// (the per-property didSets are skipped under the flag).
     private func applyGPSLocation(_ location: CLLocation) {
-        isApplyingGPSUpdate = true
-        observerLatitude = location.coordinate.latitude
-        observerLongitude = location.coordinate.longitude
-        observerAltitude = location.altitude
-        isApplyingGPSUpdate = false
+        let positionChanged: Bool
+        if gpsPositionLocked {
+            positionChanged = false
+        } else {
+            isApplyingGPSUpdate = true
+            observerLatitude = location.coordinate.latitude
+            observerLongitude = location.coordinate.longitude
+            observerAltitude = location.altitude
+            isApplyingGPSUpdate = false
+            positionChanged = true
+        }
 
-        gpsStatus = .fixed(horizontalAccuracyMeters: location.horizontalAccuracy)
+        gpsStatus = .fixed(
+            horizontalAccuracyMeters: location.horizontalAccuracy,
+            verticalAccuracyMeters: location.verticalAccuracy >= 0 ? location.verticalAccuracy : nil
+        )
         lastLocationError = nil
         gpsTimeoutTask?.cancel()
         gpsTimeoutTask = nil
-        reconfigureFlightProvider()
+
+        if positionChanged {
+            reconfigureFlightProvider()
+        }
+    }
+
+    /// Toggles whether incoming GPS fixes update the observer position.
+    /// The accuracy display remains live so the user can see when a
+    /// better fix is available and decide to unlock to capture it.
+    func setGPSPositionLocked(_ locked: Bool) {
+        gpsPositionLocked = locked
     }
 }

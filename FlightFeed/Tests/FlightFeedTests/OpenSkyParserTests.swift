@@ -23,7 +23,7 @@ final class OpenSkyParserTests: XCTestCase {
         XCTAssertEqual(first.id, "abc123")
         XCTAssertEqual(first.callsign, "SWR214")  // trimmed
         XCTAssertEqual(first.originCountry, "Switzerland")
-        XCTAssertEqual(first.altitudeMeters, 950.0)
+        XCTAssertEqual(first.altitudeMeters, 970.0)
         XCTAssertEqual(first.velocityMetersPerSecond, 120.0)
         XCTAssertEqual(first.trueTrackDegrees, 90.0)
         XCTAssertEqual(first.verticalRateMetersPerSecond, 1.5)
@@ -33,6 +33,22 @@ final class OpenSkyParserTests: XCTestCase {
         XCTAssertEqual(second.callsign, "")
         XCTAssertTrue(second.isOnGround)
         XCTAssertNil(second.altitudeMeters)
+        XCTAssertEqual(second.verticalRateMetersPerSecond, 0)
+    }
+
+    func testGroundStateZeroesReportedVerticalRate() throws {
+        let payload = """
+        {
+          "time": 1714723200,
+          "states": [
+            ["abc123", "AUA147  ", "Austria", 1714723195, 1714723199, 8.5570, 47.4536, 457.2, true, 0.0, 5.62, -4.88, null, null, "1000", false, 0]
+          ]
+        }
+        """
+        let region = RadiusRegion(latitudeDegrees: 47.4647, longitudeDegrees: 8.5492, radiusKm: 50)
+        let result = try OpenSkyParser.parse(data: Data(payload.utf8), region: region)
+
+        XCTAssertEqual(result.flights.first?.verticalRateMetersPerSecond, 0)
     }
 
     func testHandlesNullStatesArray() throws {

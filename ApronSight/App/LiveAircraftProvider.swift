@@ -46,7 +46,15 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
     @MainActor
     func update(observer: GeoCoordinate, source: FlightDataSource, force: Bool = false) {
         let region = RadiusRegion(centerOf: observer, radiusKm: 50)
-        guard force || region != currentRegion || source != currentSource else {
+        let regionMovedSignificantly = region.centerMoved(
+            beyondMeters: Self.regionRestartThresholdMeters,
+            from: currentRegion
+        )
+        guard force || regionMovedSignificantly || source != currentSource else {
+            // Small GPS jitter is below the hysteresis threshold; the
+            // existing feed keeps running and the retention buffer stays
+            // intact. Aircraft don't flicker just because the observer
+            // shifted a few metres.
             return
         }
 
@@ -103,19 +111,31 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
         state.invalidateSnapshot()
     }
 
-    func aircraft(at date: Date) -> [Aircraft] {
-        guard let snapshot = state.snapshot else {
-            return []
-        }
+    /// How long an aircraft stays visible after its last appearance in
+    /// an OpenSky poll. Decoupled from `GeoMath.maximumDeadReckoningSeconds`
+    /// (the safety bound on position extrapolation) so an aircraft can
+    /// stay rendered through 60–90 s coverage gaps even though its
+    /// predicted position freezes at the 30 s extrapolation limit.
+    static let retentionSeconds: TimeInterval = 90
 
-        let elapsedSeconds = GeoMath.deadReckoningElapsedSeconds(capturedAt: snapshot.capturedAt, date: date)
-        return snapshot.flights.compactMap { flight in
-            aircraft(from: flight, elapsedSeconds: elapsedSeconds)
+    func aircraft(at date: Date) -> [Aircraft] {
+        return state.entries(at: date).compactMap { entry in
+            // Dead-reckoning is bounded by GeoMath.maximumDeadReckoningSeconds,
+            // so positions of aircraft silent for >30 s are frozen at
+            // their 30 s-extrapolated position rather than drifting.
+            // Use the aircraft's own position timestamp rather than the
+            // poll timestamp; OpenSky can repeat stale state vectors in a
+            // fresh response, especially for surface traffic.
+            let elapsedSeconds = GeoMath.deadReckoningElapsedSeconds(
+                capturedAt: entry.flight.positionTimestamp,
+                date: date
+            )
+            return aircraft(from: entry.flight, elapsedSeconds: elapsedSeconds)
         }
     }
 
     func snapshotAgeSeconds(at date: Date = Date()) -> TimeInterval? {
-        state.snapshot.map { max(date.timeIntervalSince($0.capturedAt), 0) }
+        state.latestSnapshotCapturedAt.map { max(date.timeIntervalSince($0), 0) }
     }
 
     @MainActor
@@ -132,20 +152,28 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
         }
     }
 
+    /// Hysteresis threshold for restarting the OpenSky feed when the
+    /// observer moves. The bbox is 50 km radius, so a 1 km shift in
+    /// the centre doesn't meaningfully change which aircraft are in
+    /// range. Sub-threshold GPS jitter no longer wipes the retention
+    /// buffer.
+    static let regionRestartThresholdMeters: Double = 1_000
+
     private func aircraft(from flight: LiveFlight, elapsedSeconds: TimeInterval) -> Aircraft? {
         guard let altitudeMeters = flight.altitudeMeters else {
             return nil
         }
 
         let speed = flight.velocityMetersPerSecond ?? 0
-        let verticalRate = flight.verticalRateMetersPerSecond ?? 0
+        let verticalRate = flight.isOnGround ? 0 : (flight.verticalRateMetersPerSecond ?? 0)
+        let deadReckoningSpeed = flight.trueTrackDegrees == nil ? 0 : speed
         let coordinate = GeoMath.deadReckonedCoordinate(
             from: GeoCoordinate(
                 latitudeDegrees: flight.latitudeDegrees,
                 longitudeDegrees: flight.longitudeDegrees,
                 altitudeMeters: altitudeMeters
             ),
-            velocityMetersPerSecond: speed,
+            velocityMetersPerSecond: deadReckoningSpeed,
             trueTrackDegrees: flight.trueTrackDegrees ?? 0,
             verticalRateMetersPerSecond: verticalRate,
             elapsedSeconds: elapsedSeconds
@@ -159,7 +187,7 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
             coordinate: coordinate,
             velocityMetersPerSecond: speed,
             trueTrackDegrees: flight.trueTrackDegrees,
-            verticalRateMetersPerSecond: flight.verticalRateMetersPerSecond,
+            verticalRateMetersPerSecond: flight.isOnGround ? 0 : flight.verticalRateMetersPerSecond,
             isOnGround: flight.isOnGround
         )
     }
@@ -167,20 +195,26 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
 
 private final class LiveAircraftProviderState: @unchecked Sendable {
     private let lock = NSLock()
-    private var latestSnapshot: FlightSnapshot?
+    private var buffer = FlightRetentionBuffer(retentionSeconds: LiveAircraftProvider.retentionSeconds)
     private var generation = 0
 
-    var snapshot: FlightSnapshot? {
+    var latestSnapshotCapturedAt: Date? {
         lock.lock()
         defer { lock.unlock() }
-        return latestSnapshot
+        return buffer.latestCapturedAt
+    }
+
+    func entries(at date: Date) -> [FlightRetentionBuffer.Entry] {
+        lock.lock()
+        defer { lock.unlock() }
+        return buffer.entries(at: date)
     }
 
     func startNewGeneration() -> Int {
         lock.lock()
         defer { lock.unlock() }
         generation += 1
-        latestSnapshot = nil
+        buffer.clear()
         return generation
     }
 
@@ -188,7 +222,7 @@ private final class LiveAircraftProviderState: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         generation += 1
-        latestSnapshot = nil
+        buffer.clear()
     }
 
     func isCurrentGeneration(_ generation: Int) -> Bool {
@@ -203,8 +237,7 @@ private final class LiveAircraftProviderState: @unchecked Sendable {
         guard self.generation == generation else {
             return false
         }
-
-        latestSnapshot = snapshot
+        buffer.ingest(snapshot)
         return true
     }
 }
