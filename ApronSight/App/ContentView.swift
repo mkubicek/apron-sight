@@ -629,13 +629,14 @@ private struct DebugPanel: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-        case .fixed:
+        case .fixed(let accuracyMeters):
             HStack(spacing: 6) {
                 Image(systemName: "location.fill")
                     .foregroundStyle(.green)
-                Text("GPS fix")
+                Text("GPS fix · ±\(accuracyMeters, format: .number.precision(.fractionLength(accuracyMeters >= 10 ? 0 : 1))) m")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
         }
     }

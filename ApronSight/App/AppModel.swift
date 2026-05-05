@@ -21,7 +21,10 @@ enum GPSStatus: Equatable {
     /// GPS preset selected, awaiting first valid fix.
     case locating
     /// At least one valid fix received since the preset was activated.
-    case fixed
+    /// The associated value is CoreLocation's reported horizontal
+    /// accuracy in meters (radius of 68 % confidence circle around
+    /// the reported lat/lon).
+    case fixed(horizontalAccuracyMeters: Double)
 }
 
 struct AircraftStatus {
@@ -780,7 +783,7 @@ final class AppModel: ObservableObject {
         observerAltitude = location.altitude
         isApplyingGPSUpdate = false
 
-        gpsStatus = .fixed
+        gpsStatus = .fixed(horizontalAccuracyMeters: location.horizontalAccuracy)
         lastLocationError = nil
         gpsTimeoutTask?.cancel()
         gpsTimeoutTask = nil
