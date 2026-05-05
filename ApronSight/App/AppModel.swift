@@ -229,6 +229,10 @@ final class AppModel: ObservableObject {
         observerAltitude - observerHeightAboveGroundMeters + verticalCalibrationOffsetMeters
     }
 
+    var observerPhysicalGroundAltitudeMeters: Double {
+        observerAltitude - observerHeightAboveGroundMeters
+    }
+
     var observerGroundRealityPosition: SIMD3<Float> {
         SIMD3<Float>(0, Float(observerGroundElevationMeters - observerAltitude), 0)
     }
@@ -536,7 +540,11 @@ final class AppModel: ObservableObject {
     }
 
     func refreshFlights() {
-        aircraftProvider.reset(observer: observer, source: flightDataSource)
+        aircraftProvider.reset(
+            observer: observer,
+            groundAltitudeMeters: observerPhysicalGroundAltitudeMeters,
+            source: flightDataSource
+        )
         publishCurrentAircraft()
     }
 
@@ -545,7 +553,11 @@ final class AppModel: ObservableObject {
             return
         }
 
-        aircraftProvider.start(observer: observer, source: flightDataSource)
+        aircraftProvider.start(
+            observer: observer,
+            groundAltitudeMeters: observerPhysicalGroundAltitudeMeters,
+            source: flightDataSource
+        )
         flightUpdateTask = Task { [weak self] in
             guard let self else {
                 return
@@ -589,7 +601,12 @@ final class AppModel: ObservableObject {
     }
 
     private func reconfigureFlightProvider(force: Bool = false) {
-        aircraftProvider.update(observer: observer, source: flightDataSource, force: force)
+        aircraftProvider.update(
+            observer: observer,
+            groundAltitudeMeters: observerPhysicalGroundAltitudeMeters,
+            source: flightDataSource,
+            force: force
+        )
     }
 
     private func publishCurrentAircraft() {

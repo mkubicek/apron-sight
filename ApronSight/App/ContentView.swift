@@ -760,7 +760,7 @@ private struct CompassDial: View {
                     .font(.system(size: isSelected ? 18 : 11))
                     .foregroundStyle(isSelected ? .yellow : .secondary)
                     // SF Symbol "airplane" defaults to nose pointing
-                    // up-right at 45 deg; subtracting that puts a 0 deg
+                    // right/east at 90 deg; subtracting that puts a 0 deg
                     // relative track straight up the dial.
                     .rotationEffect(.degrees(relativeTrack - Self.airplaneSymbolDefaultRotationDegrees))
             } else if isSelected {
@@ -784,7 +784,7 @@ private struct CompassDial: View {
     }
 
     private static let minimumDirectionalSpeedMetersPerSecond: Double = 1
-    private static let airplaneSymbolDefaultRotationDegrees: Double = 45
+    private static let airplaneSymbolDefaultRotationDegrees: Double = 90
 
     private func point(
         forBearing bearingDegrees: Double,

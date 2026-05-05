@@ -21,6 +21,7 @@ final class ImmersiveSceneRenderer {
     weak var selectionRing: ModelEntity?
     var aircraftEntitiesByID: [String: Entity] = [:]
     var aircraftVisualsByID: [String: Entity] = [:]
+    var nearbyDetailedAircraftByID: [String: Entity] = [:]
     var selectionProxyByAircraftID: [String: Entity] = [:]
     var selectionProxyRadiusByAircraftID: [String: Float] = [:]
 }
@@ -42,6 +43,9 @@ struct ImmersiveView: View {
     private static let selectionRingAircraftLengthFactor: Float = 0.6
     /// Ring colour for the selection ring around the picked aircraft.
     private static let selectionRingDefaultColor = UIColor.systemYellow.withAlphaComponent(0.85)
+    /// Temporary LOD experiment: render the textured aircraft for every
+    /// target inside this horizontal range to measure the frame-budget cost.
+    private static let nearbyDetailedAircraftHorizontalRangeMeters: Float = 1_000
 
     var body: some View {
         RealityView { content in
@@ -165,6 +169,11 @@ struct ImmersiveView: View {
         let referencePosition = aircraftPositions[referenceAircraft.id]
             ?? model.realityPosition(for: referenceAircraft)
         let referenceOrientation = Self.aircraftOrientation(for: referenceAircraft, model: model)
+        let nearbyDetailedAircraftIDs = nearbyDetailedAircraftIDs(
+            aircraftList: aircraftList,
+            aircraftPositions: aircraftPositions
+        )
+        let detailedVisualAircraftIDs = nearbyDetailedAircraftIDs.union([referenceAircraft.id])
 
         let userPosition = Self.userPosition(renderer)
 
@@ -174,7 +183,8 @@ struct ImmersiveView: View {
                 renderer: renderer,
                 aircraftList: aircraftList,
                 aircraftPositions: aircraftPositions,
-                detailedAircraftID: referenceAircraft.id,
+                nearbyDetailedAircraftIDs: nearbyDetailedAircraftIDs,
+                detailedVisualAircraftIDs: detailedVisualAircraftIDs,
                 model: model
             )
         }
@@ -205,7 +215,7 @@ struct ImmersiveView: View {
             detailedAircraft.position = referencePosition
             detailedAircraft.orientation = referenceOrientation
             detailedAircraft.scale = model.aircraftScale
-            detailedAircraft.isEnabled = true
+            detailedAircraft.isEnabled = !nearbyDetailedAircraftIDs.contains(referenceAircraft.id)
         }
 
         if let keyLight = renderer.keyLight {
@@ -265,7 +275,8 @@ struct ImmersiveView: View {
         renderer: ImmersiveSceneRenderer,
         aircraftList: [Aircraft],
         aircraftPositions: [String: SIMD3<Float>],
-        detailedAircraftID: String,
+        nearbyDetailedAircraftIDs: Set<String>,
+        detailedVisualAircraftIDs: Set<String>,
         model: AppModel
     ) {
         var activeAircraftIDs = Set<String>()
@@ -285,7 +296,24 @@ struct ImmersiveView: View {
 
             if let visual = renderer.aircraftVisualsByID[aircraft.id] {
                 visual.scale = model.markerVisualScale(for: aircraft)
-                visual.isEnabled = aircraft.id != detailedAircraftID
+                visual.isEnabled = !detailedVisualAircraftIDs.contains(aircraft.id)
+            }
+
+            if nearbyDetailedAircraftIDs.contains(aircraft.id) {
+                let detailed = renderer.nearbyDetailedAircraftByID[aircraft.id] ?? {
+                    let newDetailed = makeDetailedAircraftInstance(renderer: renderer)
+                    newDetailed.name = "NearbyDetailedAircraft:\(aircraft.id)"
+                    entity.addChild(newDetailed)
+                    renderer.nearbyDetailedAircraftByID[aircraft.id] = newDetailed
+                    return newDetailed
+                }()
+                detailed.position = .zero
+                detailed.orientation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+                detailed.scale = model.aircraftScale
+                detailed.isEnabled = true
+            } else if let detailed = renderer.nearbyDetailedAircraftByID[aircraft.id] {
+                detailed.removeFromParent()
+                renderer.nearbyDetailedAircraftByID[aircraft.id] = nil
             }
         }
 
@@ -294,7 +322,34 @@ struct ImmersiveView: View {
             renderer.aircraftEntitiesByID[aircraftID]?.removeFromParent()
             renderer.aircraftEntitiesByID[aircraftID] = nil
             renderer.aircraftVisualsByID[aircraftID] = nil
+            renderer.nearbyDetailedAircraftByID[aircraftID] = nil
         }
+    }
+
+    private static func nearbyDetailedAircraftIDs(
+        aircraftList: [Aircraft],
+        aircraftPositions: [String: SIMD3<Float>]
+    ) -> Set<String> {
+        Set(aircraftList.compactMap { aircraft in
+            guard let position = aircraftPositions[aircraft.id] else {
+                return nil
+            }
+
+            let horizontalDistance = sqrt(position.x * position.x + position.z * position.z)
+            return horizontalDistance <= nearbyDetailedAircraftHorizontalRangeMeters ? aircraft.id : nil
+        })
+    }
+
+    private static func makeDetailedAircraftInstance(renderer: ImmersiveSceneRenderer) -> Entity {
+        if let prototype = renderer.detailedAircraft?.clone(recursive: true) {
+            prototype.position = .zero
+            prototype.orientation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+            prototype.scale = SIMD3<Float>(repeating: 1)
+            prototype.isEnabled = true
+            return prototype
+        }
+
+        return makeA350Marker()
     }
 
     private static func makeSelectionProxyEntity(id: String) -> Entity {

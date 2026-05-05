@@ -39,12 +39,18 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
     }
 
     @MainActor
-    func start(observer: GeoCoordinate, source: FlightDataSource) {
-        update(observer: observer, source: source, force: true)
+    func start(observer: GeoCoordinate, groundAltitudeMeters: Double, source: FlightDataSource) {
+        update(observer: observer, groundAltitudeMeters: groundAltitudeMeters, source: source, force: true)
     }
 
     @MainActor
-    func update(observer: GeoCoordinate, source: FlightDataSource, force: Bool = false) {
+    func update(
+        observer: GeoCoordinate,
+        groundAltitudeMeters: Double,
+        source: FlightDataSource,
+        force: Bool = false
+    ) {
+        state.setGroundAltitudeMeters(groundAltitudeMeters)
         let region = RadiusRegion(centerOf: observer, radiusKm: 50)
         let regionMovedSignificantly = region.centerMoved(
             beyondMeters: Self.regionRestartThresholdMeters,
@@ -119,6 +125,7 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
     static let retentionSeconds: TimeInterval = 90
 
     func aircraft(at date: Date) -> [Aircraft] {
+        let fallbackGroundAltitudeMeters = state.groundAltitudeMeters
         return state.entries(at: date).compactMap { entry in
             // Dead-reckoning is bounded by GeoMath.maximumDeadReckoningSeconds,
             // so positions of aircraft silent for >30 s are frozen at
@@ -130,7 +137,11 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
                 capturedAt: entry.flight.positionTimestamp,
                 date: date
             )
-            return aircraft(from: entry.flight, elapsedSeconds: elapsedSeconds)
+            return aircraft(
+                from: entry.flight,
+                elapsedSeconds: elapsedSeconds,
+                fallbackGroundAltitudeMeters: fallbackGroundAltitudeMeters
+            )
         }
     }
 
@@ -139,8 +150,8 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
     }
 
     @MainActor
-    func reset(observer: GeoCoordinate, source: FlightDataSource) {
-        update(observer: observer, source: source, force: true)
+    func reset(observer: GeoCoordinate, groundAltitudeMeters: Double, source: FlightDataSource) {
+        update(observer: observer, groundAltitudeMeters: groundAltitudeMeters, source: source, force: true)
     }
 
     private func provider(for source: FlightDataSource) -> any FlightProvider {
@@ -159,8 +170,17 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
     /// buffer.
     static let regionRestartThresholdMeters: Double = 1_000
 
-    private func aircraft(from flight: LiveFlight, elapsedSeconds: TimeInterval) -> Aircraft? {
-        guard let altitudeMeters = flight.altitudeMeters else {
+    private func aircraft(
+        from flight: LiveFlight,
+        elapsedSeconds: TimeInterval,
+        fallbackGroundAltitudeMeters: Double?
+    ) -> Aircraft? {
+        let altitudeMeters: Double
+        if let reportedAltitude = flight.altitudeMeters {
+            altitudeMeters = reportedAltitude
+        } else if flight.isOnGround, let fallbackGroundAltitudeMeters {
+            altitudeMeters = fallbackGroundAltitudeMeters
+        } else {
             return nil
         }
 
@@ -197,11 +217,24 @@ private final class LiveAircraftProviderState: @unchecked Sendable {
     private let lock = NSLock()
     private var buffer = FlightRetentionBuffer(retentionSeconds: LiveAircraftProvider.retentionSeconds)
     private var generation = 0
+    private var fallbackGroundAltitudeMeters: Double?
 
     var latestSnapshotCapturedAt: Date? {
         lock.lock()
         defer { lock.unlock() }
         return buffer.latestCapturedAt
+    }
+
+    var groundAltitudeMeters: Double? {
+        lock.lock()
+        defer { lock.unlock() }
+        return fallbackGroundAltitudeMeters
+    }
+
+    func setGroundAltitudeMeters(_ meters: Double) {
+        lock.lock()
+        defer { lock.unlock() }
+        fallbackGroundAltitudeMeters = meters
     }
 
     func entries(at date: Date) -> [FlightRetentionBuffer.Entry] {
