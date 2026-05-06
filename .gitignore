@@ -4,5 +4,7 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 .swiftpm/
+__pycache__/
+*.pyc
 Config/OpenSkyCredentials.local.json
 models-staging/

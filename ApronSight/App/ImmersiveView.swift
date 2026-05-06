@@ -24,6 +24,8 @@ final class ImmersiveSceneRenderer {
     var aircraftVisualKindsByID: [String: TrafficKind] = [:]
     var selectionProxyByAircraftID: [String: Entity] = [:]
     var selectionProxyRadiusByAircraftID: [String: Float] = [:]
+    var motionSmoother = AircraftMotionSmoother()
+    var renderedAircraft: [Aircraft] = []
 }
 
 struct ImmersiveView: View {
@@ -134,7 +136,9 @@ struct ImmersiveView: View {
                         return
                     }
 
-                    let aircraftList = model.currentAircraft()
+                    let aircraftList = renderer.renderedAircraft.isEmpty
+                        ? model.currentAircraft()
+                        : renderer.renderedAircraft
                     if let id = Self.selectedAircraftID(
                         tapPosition: tapPosition,
                         userPosition: userPosition,
@@ -151,7 +155,10 @@ struct ImmersiveView: View {
 
     @MainActor
     private static func renderScene(model: AppModel, renderer: ImmersiveSceneRenderer) {
-        let aircraftList = model.currentAircraft()
+        let renderDate = Date()
+        let physicalAircraftList = model.currentAircraft(at: renderDate)
+        let aircraftList = renderer.motionSmoother.smooth(physicalAircraftList, at: renderDate)
+        renderer.renderedAircraft = aircraftList
         // Single source of truth for aircraft world positions this frame.
         // Both the visual aircraft tree and the selection-proxy tree must use
         // the same numbers, otherwise they can disagree by one frame and

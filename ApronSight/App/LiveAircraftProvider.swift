@@ -163,9 +163,13 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
     /// range. Sub-threshold GPS jitter no longer wipes the retention
     /// buffer.
     static let regionRestartThresholdMeters: Double = 1_000
-    /// Live OpenSky traffic is rendered slightly behind wall-clock time so
-    /// out-of-order rows can become interpolation samples instead of jumps.
-    static let liveInterpolationDelaySeconds: TimeInterval = 3
+    /// The ZRH motion study on 2026-05-06 showed that delaying live traffic
+    /// adds more visible spatial error than it removes: OpenSky's reported
+    /// speed/track was the best short-horizon predictor for arrivals,
+    /// departures, and taxiing, while delayed interpolation lagged real motion.
+    /// Keep interpolation available for genuinely bracketed late rows, but
+    /// render live traffic at wall-clock time by default.
+    static let liveInterpolationDelaySeconds: TimeInterval = 0
     /// Avoid slow-motion interpolation across long OpenSky coverage gaps.
     static let maximumInterpolationGapSeconds: TimeInterval = 20
     /// Surface reports are sparse and velocity/track can be stale. Taxi
@@ -180,6 +184,13 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
     /// Only apply the ground-plane altitude clamp close to the observer's
     /// calibrated ground altitude; this is a flat local approximation, not DEM.
     static let lowAltitudeGroundClampWindowMeters: Double = 150
+    /// Fitted from the same ZRH sample. These are intentionally conservative:
+    /// reported OpenSky kinematics beat position-derived velocity, so the app
+    /// only applies a tiny damping factor and snaps near-stationary surface
+    /// reports to zero to avoid slow drift around stands and taxiway holds.
+    static let airborneDeadReckoningSpeedScale: Double = 0.99
+    static let groundDeadReckoningSpeedScale: Double = 0.99
+    static let stationaryGroundSpeedThresholdMetersPerSecond: Double = 2
 
     private func aircraft(
         from track: FlightRetentionBuffer.Track,
@@ -340,7 +351,7 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
 
         let speed = flight.velocityMetersPerSecond ?? 0
         let verticalRate = flight.isOnGround ? 0 : (flight.verticalRateMetersPerSecond ?? 0)
-        let deadReckoningSpeed = flight.trueTrackDegrees == nil ? 0 : speed
+        let deadReckoningSpeed = Self.deadReckoningSpeed(for: flight)
         let horizontalElapsedSeconds = flight.isOnGround
             ? Self.groundDeadReckoningElapsedSeconds(elapsedSeconds)
             : elapsedSeconds
@@ -421,6 +432,23 @@ final class LiveAircraftProvider: AircraftProvider, @unchecked Sendable {
             fullSpeedGroundDeadReckoningSeconds + easedSeconds,
             maximumGroundDeadReckoningSeconds
         )
+    }
+
+    private static func deadReckoningSpeed(for flight: LiveFlight) -> Double {
+        guard flight.trueTrackDegrees != nil else {
+            return 0
+        }
+
+        let speed = flight.velocityMetersPerSecond ?? 0
+        if flight.isOnGround {
+            guard speed >= stationaryGroundSpeedThresholdMetersPerSecond else {
+                return 0
+            }
+
+            return speed * groundDeadReckoningSpeedScale
+        }
+
+        return speed * airborneDeadReckoningSpeedScale
     }
 
     private func interpolatedScalar(_ before: Double?, _ after: Double?, fraction: Double) -> Double? {

@@ -22,6 +22,7 @@
 		8B6A1F1E2D4C4A9187B0010D /* OpenSkyConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B0002E /* OpenSkyConfiguration.swift */; };
 		8B6A1F1E2D4C4A9187B00111 /* CompassCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00031 /* CompassCalibration.swift */; };
 		8B6A1F1E2D4C4A9187B00113 /* GPSLocationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00033 /* GPSLocationProvider.swift */; };
+		8B6A1F1E2D4C4A9187B00114 /* AircraftMotionSmoother.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6A1F1E2D4C4A9187B00034 /* AircraftMotionSmoother.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,6 +42,7 @@
 		8B6A1F1E2D4C4A9187B0002E /* OpenSkyConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenSkyConfiguration.swift; sourceTree = "<group>"; };
 		8B6A1F1E2D4C4A9187B00031 /* CompassCalibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompassCalibration.swift; sourceTree = "<group>"; };
 		8B6A1F1E2D4C4A9187B00033 /* GPSLocationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPSLocationProvider.swift; sourceTree = "<group>"; };
+		8B6A1F1E2D4C4A9187B00034 /* AircraftMotionSmoother.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AircraftMotionSmoother.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -95,6 +97,7 @@
 				8B6A1F1E2D4C4A9187B00025 /* GeoMath.swift */,
 				8B6A1F1E2D4C4A9187B00026 /* DemoScenario.swift */,
 				8B6A1F1E2D4C4A9187B00028 /* Aircraft.swift */,
+				8B6A1F1E2D4C4A9187B00034 /* AircraftMotionSmoother.swift */,
 				8B6A1F1E2D4C4A9187B0002A /* LocationPreset.swift */,
 				8B6A1F1E2D4C4A9187B00031 /* CompassCalibration.swift */,
 			);
@@ -224,6 +227,7 @@
 				8B6A1F1E2D4C4A9187B00106 /* GeoMath.swift in Sources */,
 				8B6A1F1E2D4C4A9187B00107 /* DemoScenario.swift in Sources */,
 				8B6A1F1E2D4C4A9187B00108 /* Aircraft.swift in Sources */,
+				8B6A1F1E2D4C4A9187B00114 /* AircraftMotionSmoother.swift in Sources */,
 				8B6A1F1E2D4C4A9187B0010A /* LocationPreset.swift in Sources */,
 				8B6A1F1E2D4C4A9187B0010D /* OpenSkyConfiguration.swift in Sources */,
 				8B6A1F1E2D4C4A9187B00111 /* CompassCalibration.swift in Sources */,
